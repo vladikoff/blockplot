@@ -27,6 +27,7 @@ User.prototype.getSession = function(cb) {
   var self = this
   var opts = { json: true, url: this.options.baseURL + '_session'}
   request(opts, function(err, resp, profile) {
+    if (err) return cb(err, {})
     if (!profile.email) return cb(err, profile)
     self.db.put('profile', profile, function(err) {
       cb(err, profile)
@@ -9869,7 +9870,7 @@ module.exports.create = function (options, db, iteratorFactory) {
 }
 
 })(require("__browserify_buffer").Buffer)
-},{"stream":20,"util":10,"./read-stream-state":34,"./errors":26,"./util":29,"simple-bufferstream":44,"xtend":31,"__browserify_buffer":39}],28:[function(require,module,exports){
+},{"stream":20,"util":10,"./errors":26,"./read-stream-state":34,"./util":29,"simple-bufferstream":44,"xtend":31,"__browserify_buffer":39}],28:[function(require,module,exports){
 /* Copyright (c) 2012-2013 LevelUP contributors
  * See list at <https://github.com/rvagg/node-levelup#contributing>
  * MIT +no-false-attribs License
