@@ -35,7 +35,6 @@ User.prototype.getSession = function(cb) {
   })
 }
 
-
 },{"browser-request":2,"levelup":3,"level-js":4,"persona-id":5,"level-sublevel":6}],2:[function(require,module,exports){
 (function(){// Browser Request
 //
@@ -9523,7 +9522,76 @@ Iterator.prototype._next = function (callback) {
   }
   this.callback = callback
 }
-},{"util":10,"abstract-leveldown":24}],42:[function(require,module,exports){
+},{"util":10,"abstract-leveldown":24}],36:[function(require,module,exports){
+
+//force to a valid range
+var range = exports.range = function (obj) {
+  return null == obj ? {} : 'string' === typeof range ? {
+      min: range, max: range + '\xff'
+    } :  obj
+}
+
+//turn into a sub range.
+var prefix = exports.prefix = function (range, within, term) {
+  range = exports.range(range)
+  var _range = {}
+  term = term || '\xff'
+  if(range instanceof RegExp || 'function' == typeof range) {
+    _range.min = within
+    _range.max   = within + term,
+    _range.inner = function (k) {
+      var j = k.substring(within.length)
+      if(range.test)
+        return range.test(j)
+      return range(j)
+    }
+  }
+  else if('object' === typeof range) {
+    _range.min = within + (range.min || range.start || '')
+    _range.max = within + (range.max || range.end   || (term || '~'))
+  }
+  return _range
+}
+
+//return a function that checks a range
+var checker = exports.checker = function (range) {
+  if(!range) range = {}
+
+  if ('string' === typeof range)
+    return function (key) {
+      return key.indexOf(range) == 0
+    }
+  else if(range instanceof RegExp)
+    return function (key) {
+      return range.test(key)
+    }
+  else if('object' === typeof range)
+    return function (key) {
+      var min = range.min || range.start
+      var max = range.max || range.end
+      return (
+        !min || key >= min
+      ) && (
+        !max || key <= max
+      ) && (
+        !range.inner || (
+          range.inner.test 
+            ? range.inner.test(key)
+            : range.inner(key)
+        )
+      )
+    }
+  else if('function' === typeof range)
+    return range
+}
+//check if a key is within a range.
+var satifies = exports.satisfies = function (key, range) {
+  return checker(range)(key)
+}
+
+
+
+},{}],42:[function(require,module,exports){
 exports.readIEEE754 = function(buffer, offset, isBE, mLen, nBytes) {
   var e, m,
       eLen = nBytes * 8 - mLen - 1,
@@ -9608,75 +9676,6 @@ exports.writeIEEE754 = function(buffer, value, offset, isBE, mLen, nBytes) {
 
   buffer[offset + i - d] |= s * 128;
 };
-
-},{}],36:[function(require,module,exports){
-
-//force to a valid range
-var range = exports.range = function (obj) {
-  return null == obj ? {} : 'string' === typeof range ? {
-      min: range, max: range + '\xff'
-    } :  obj
-}
-
-//turn into a sub range.
-var prefix = exports.prefix = function (range, within, term) {
-  range = exports.range(range)
-  var _range = {}
-  term = term || '\xff'
-  if(range instanceof RegExp || 'function' == typeof range) {
-    _range.min = within
-    _range.max   = within + term,
-    _range.inner = function (k) {
-      var j = k.substring(within.length)
-      if(range.test)
-        return range.test(j)
-      return range(j)
-    }
-  }
-  else if('object' === typeof range) {
-    _range.min = within + (range.min || range.start || '')
-    _range.max = within + (range.max || range.end   || (term || '~'))
-  }
-  return _range
-}
-
-//return a function that checks a range
-var checker = exports.checker = function (range) {
-  if(!range) range = {}
-
-  if ('string' === typeof range)
-    return function (key) {
-      return key.indexOf(range) == 0
-    }
-  else if(range instanceof RegExp)
-    return function (key) {
-      return range.test(key)
-    }
-  else if('object' === typeof range)
-    return function (key) {
-      var min = range.min || range.start
-      var max = range.max || range.end
-      return (
-        !min || key >= min
-      ) && (
-        !max || key <= max
-      ) && (
-        !range.inner || (
-          range.inner.test 
-            ? range.inner.test(key)
-            : range.inner(key)
-        )
-      )
-    }
-  else if('function' === typeof range)
-    return range
-}
-//check if a key is within a range.
-var satifies = exports.satisfies = function (key, range) {
-  return checker(range)(key)
-}
-
-
 
 },{}],26:[function(require,module,exports){
 /* Copyright (c) 2012-2013 LevelUP contributors
@@ -10040,140 +10039,7 @@ WriteStream.prototype.toString = function () {
 module.exports.create = function (options, db) {
   return new WriteStream(options, db)
 }
-},{"stream":20,"util":10,"./util":29,"xtend":31,"concat-stream":45}],29:[function(require,module,exports){
-(function(process,Buffer,global){/* Copyright (c) 2012-2013 LevelUP contributors
- * See list at <https://github.com/rvagg/node-levelup#contributing>
- * MIT +no-false-attribs License
- * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
- */
-
-var extend = require('xtend')
-  , errors = require('./errors')
-
-  , encodings = [
-        'hex'
-      , 'utf8'
-      , 'utf-8'
-      , 'ascii'
-      , 'binary'
-      , 'base64'
-      , 'ucs2'
-      , 'ucs-2'
-      , 'utf16le'
-      , 'utf-16le'
-    ]
-
-  , defaultOptions = {
-        createIfMissing : true
-      , errorIfExists   : false
-      , keyEncoding     : 'utf8'
-      , valueEncoding   : 'utf8'
-      , compression     : true
-    }
-
-  , leveldown
-
-  , toSlice = (function () {
-      var slicers = {}
-        , isBuffer = function (data) {
-            return data === undefined || data === null || Buffer.isBuffer(data)
-          }
-      slicers.json = JSON.stringify.bind(JSON)
-      slicers.utf8 = function (data) {
-        return isBuffer(data) ? data : String(data)
-      }
-      encodings.forEach(function (enc) {
-        if (slicers[enc]) return
-        slicers[enc] = function (data) {
-          return isBuffer(data) ? data : new Buffer(data, enc)
-        }
-      })
-      return slicers
-    }())
-
-  , toEncoding = (function () {
-      var encoders = {}
-      encoders.json = function (str) { return JSON.parse(str) }
-      encoders.utf8 = function (str) { return str }
-      encoders.binary = function (buffer) { return buffer }
-      encodings.forEach(function (enc) {
-        if (encoders[enc]) return
-        encoders[enc] = function (buffer) { return buffer.toString(enc) }
-      })
-      return encoders
-    }())
-
-  , copy = function (srcdb, dstdb, callback) {
-      srcdb.readStream()
-        .pipe(dstdb.writeStream())
-        .on('close', callback ? callback : function () {})
-        .on('error', callback ? callback : function (err) { throw err })
-    }
-
-  , setImmediate = global.setImmediate || process.nextTick
-
-  , encodingOpts = (function () {
-      var eo = {}
-      encodings.forEach(function (e) {
-        eo[e] = { valueEncoding : e }
-      })
-      return eo
-    }())
-
-  , getOptions = function (levelup, options) {
-      var s = typeof options == 'string' // just an encoding
-      if (!s && options && options.encoding && !options.valueEncoding)
-        options.valueEncoding = options.encoding
-      return extend(
-          (levelup && levelup.options) || {}
-        , s ? encodingOpts[options] || encodingOpts[defaultOptions.valueEncoding]
-            : options
-      )
-    }
-
-  , getLevelDOWN = function () {
-      if (leveldown)
-        return leveldown
-
-      var requiredVersion       = require('../package.json').devDependencies.leveldown
-        , missingLevelDOWNError = 'Could not locate LevelDOWN, try `npm install leveldown`'
-        , leveldownVersion
-
-      try {
-        leveldownVersion = require('leveldown/package').version
-      } catch (e) {
-        throw new errors.LevelUPError(missingLevelDOWNError)
-      }
-
-      if (!require('semver').satisfies(leveldownVersion, requiredVersion)) {
-        throw new errors.LevelUPError(
-            'Installed version of LevelDOWN ('
-          + leveldownVersion
-          + ') does not match required version ('
-          + requiredVersion
-          + ')'
-        )
-      }
-
-      try {
-        return leveldown = require('leveldown')
-      } catch (e) {
-        throw new errors.LevelUPError(missingLevelDOWNError)
-      }
-    }
-
-module.exports = {
-    defaultOptions : defaultOptions
-  , toSlice        : toSlice
-  , toEncoding     : toEncoding
-  , copy           : copy
-  , setImmediate   : setImmediate
-  , getOptions     : getOptions
-  , getLevelDOWN   : getLevelDOWN
-}
-
-})(require("__browserify_process"),require("__browserify_buffer").Buffer,self)
-},{"leveldown/package":32,"semver":32,"leveldown":32,"../package.json":33,"./errors":26,"xtend":31,"__browserify_process":8,"__browserify_buffer":39}],22:[function(require,module,exports){
+},{"stream":20,"util":10,"./util":29,"xtend":31,"concat-stream":45}],22:[function(require,module,exports){
 (function(){function SlowBuffer (size) {
     this.length = size;
 };
@@ -11493,7 +11359,140 @@ SlowBuffer.prototype.writeDoubleLE = Buffer.prototype.writeDoubleLE;
 SlowBuffer.prototype.writeDoubleBE = Buffer.prototype.writeDoubleBE;
 
 })()
-},{"assert":35,"./buffer_ieee754":42,"base64-js":46}],40:[function(require,module,exports){
+},{"assert":35,"./buffer_ieee754":42,"base64-js":46}],29:[function(require,module,exports){
+(function(process,Buffer,global){/* Copyright (c) 2012-2013 LevelUP contributors
+ * See list at <https://github.com/rvagg/node-levelup#contributing>
+ * MIT +no-false-attribs License
+ * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
+ */
+
+var extend = require('xtend')
+  , errors = require('./errors')
+
+  , encodings = [
+        'hex'
+      , 'utf8'
+      , 'utf-8'
+      , 'ascii'
+      , 'binary'
+      , 'base64'
+      , 'ucs2'
+      , 'ucs-2'
+      , 'utf16le'
+      , 'utf-16le'
+    ]
+
+  , defaultOptions = {
+        createIfMissing : true
+      , errorIfExists   : false
+      , keyEncoding     : 'utf8'
+      , valueEncoding   : 'utf8'
+      , compression     : true
+    }
+
+  , leveldown
+
+  , toSlice = (function () {
+      var slicers = {}
+        , isBuffer = function (data) {
+            return data === undefined || data === null || Buffer.isBuffer(data)
+          }
+      slicers.json = JSON.stringify.bind(JSON)
+      slicers.utf8 = function (data) {
+        return isBuffer(data) ? data : String(data)
+      }
+      encodings.forEach(function (enc) {
+        if (slicers[enc]) return
+        slicers[enc] = function (data) {
+          return isBuffer(data) ? data : new Buffer(data, enc)
+        }
+      })
+      return slicers
+    }())
+
+  , toEncoding = (function () {
+      var encoders = {}
+      encoders.json = function (str) { return JSON.parse(str) }
+      encoders.utf8 = function (str) { return str }
+      encoders.binary = function (buffer) { return buffer }
+      encodings.forEach(function (enc) {
+        if (encoders[enc]) return
+        encoders[enc] = function (buffer) { return buffer.toString(enc) }
+      })
+      return encoders
+    }())
+
+  , copy = function (srcdb, dstdb, callback) {
+      srcdb.readStream()
+        .pipe(dstdb.writeStream())
+        .on('close', callback ? callback : function () {})
+        .on('error', callback ? callback : function (err) { throw err })
+    }
+
+  , setImmediate = global.setImmediate || process.nextTick
+
+  , encodingOpts = (function () {
+      var eo = {}
+      encodings.forEach(function (e) {
+        eo[e] = { valueEncoding : e }
+      })
+      return eo
+    }())
+
+  , getOptions = function (levelup, options) {
+      var s = typeof options == 'string' // just an encoding
+      if (!s && options && options.encoding && !options.valueEncoding)
+        options.valueEncoding = options.encoding
+      return extend(
+          (levelup && levelup.options) || {}
+        , s ? encodingOpts[options] || encodingOpts[defaultOptions.valueEncoding]
+            : options
+      )
+    }
+
+  , getLevelDOWN = function () {
+      if (leveldown)
+        return leveldown
+
+      var requiredVersion       = require('../package.json').devDependencies.leveldown
+        , missingLevelDOWNError = 'Could not locate LevelDOWN, try `npm install leveldown`'
+        , leveldownVersion
+
+      try {
+        leveldownVersion = require('leveldown/package').version
+      } catch (e) {
+        throw new errors.LevelUPError(missingLevelDOWNError)
+      }
+
+      if (!require('semver').satisfies(leveldownVersion, requiredVersion)) {
+        throw new errors.LevelUPError(
+            'Installed version of LevelDOWN ('
+          + leveldownVersion
+          + ') does not match required version ('
+          + requiredVersion
+          + ')'
+        )
+      }
+
+      try {
+        return leveldown = require('leveldown')
+      } catch (e) {
+        throw new errors.LevelUPError(missingLevelDOWNError)
+      }
+    }
+
+module.exports = {
+    defaultOptions : defaultOptions
+  , toSlice        : toSlice
+  , toEncoding     : toEncoding
+  , copy           : copy
+  , setImmediate   : setImmediate
+  , getOptions     : getOptions
+  , getLevelDOWN   : getLevelDOWN
+}
+
+})(require("__browserify_process"),require("__browserify_buffer").Buffer,self)
+},{"leveldown/package":32,"semver":32,"leveldown":32,"../package.json":33,"./errors":26,"xtend":31,"__browserify_process":8,"__browserify_buffer":39}],40:[function(require,module,exports){
 (function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
 
 function AbstractIterator (db) {
