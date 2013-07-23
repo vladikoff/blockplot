@@ -1,7 +1,7 @@
 var loadUser = require('./user')
 var commonStuff = require('./js/common')
 
-var user = loadUser({dbName: 'blocks', baseURL: "http://localhost:8080" })
+var user = loadUser({dbName: 'blocks', baseURL: "http://wzrd.in:9000" })
 window.user = user
 
 user.getSession(function(err, session) {
