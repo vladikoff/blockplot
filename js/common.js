@@ -11,6 +11,7 @@ module.exports = function(user) {
     .on('click', '.upload-world', openDialog)
     .on('click', '.new-world', openDialog)
     .on('click', '.open-menu', openDialog)
+    .on('click', '.menu-buttons .worlds', openWorldsList)
     .on('click', '.open-login', user.persona.identify.bind(user.persona))
     .on('click', '.show-login', showLogin)
     .on('click', '.logout', logout)
@@ -23,7 +24,6 @@ module.exports = function(user) {
   
   loadWorldsList(username)
   
-  
   function openDialog() {
     Avgrund.show( "#default-popup" )
   }
@@ -31,12 +31,16 @@ module.exports = function(user) {
   function closeDialog() {
     Avgrund.hide()
   }
+
+  function openWorldsList() {
+    loadWorldsList(username, function() {
+      Avgrund.show( "#default-popup" )
+    })
+  }
   
-  function loadWorldsList(user) {
+  function loadWorldsList(user, cb) {
+    if (!cb) cb = function noop (){}
     var loggedIn = user !== 'anonymous'
-    var greetingText = 'Hello!'
-    if (loggedIn) greetingText = 'Hello ' + user + '+!'
-    $('.greeting').text(greetingText)
     formContainer.html($('.welcome').html())
     if (loggedIn) {
       getGravatar(function(err, url) {
@@ -45,15 +49,22 @@ module.exports = function(user) {
       })
     }
     getWorlds(function(err, worlds) {
-      if (err) return
+      if (err) return console.error(err)
       var content = $('.demo-browser-content')
       var title = "Your Worlds"
       if (loggedIn) title = user + "'s Worlds"
       content.html("<h3>" + title + "</h3>")
+      var itemHTML = $('.world-item').html()
       if (worlds.length === 0) content.html("You haven't created any worlds yet!")
       worlds.map(function(world) {
-        content.append('<p><a href="/world.html#' + (loggedIn ? user : '') + '/' + world.name + '">' + world.name + '</a></p>')
+        content.append(itemHTML)
+        content.find('a:last')
+          .attr('href', '/world.html#' + (loggedIn ? user : '') + '/' + world.name)
+          .click(function() { setTimeout(function() { window.location.reload() }, 100) }) // ugh
+        content.find('dt:last').html(world.name)
+        content.find('dd:last').text(world.published ? "Published": "Unpublished")
       })
+      cb()
     })
   }
 
@@ -79,14 +90,10 @@ module.exports = function(user) {
   }
   
   function getWorlds(cb) {
-    var worldStream = user.db.createReadStream({
-      start: username + '|worlds',
-      end: username + '|x' // todo range read module
-    })
+    var worldStream = user.db.sublevel('worlds').createValueStream()
     var sentError
     worldStream.pipe(concat(function(worlds) {
       if (!worlds) worlds = []
-      worlds = worlds.map(function(w) { return w.value })
       if (!sentError) cb(false, worlds)
     }))
     worldStream.on('error', function(err) {
@@ -115,7 +122,7 @@ module.exports = function(user) {
     var worldName = $(e.target).find('#world-name').val()
     var submit = $(e.target).find('input[type="submit"]')
     submit.hide()
-    user.db.put(username + '|worlds|' + worldName, {name: worldName}, function(err) {
+    user.db.sublevel('worlds').put(worldName, {name: worldName, published: false}, function(err) {
       if (err) return submit.show()
       window.location.href = "/world.html#" + (username !== 'anonymous' ? username : '') + '/' + worldName
       
