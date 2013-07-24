@@ -48,7 +48,7 @@ self.onmessage = function(event) {
     convert(data, regionX, regionZ)
   }
 }
-},{"level-js":12,"level-sublevel":19,"levelup":61,"mca2js":30,"voxel-level":80}],2:[function(require,module,exports){
+},{"level-js":50,"level-sublevel":53,"levelup":65,"mca2js":12,"voxel-level":23}],2:[function(require,module,exports){
 (function(){// UTILITY
 var util = require('util');
 var Buffer = require("buffer").Buffer;
@@ -6200,2914 +6200,6 @@ process.chdir = function (dir) {
 };
 
 },{}],12:[function(require,module,exports){
-module.exports = Level
-
-var IDB = require('idb-wrapper')
-var AbstractLevelDOWN = require('abstract-leveldown').AbstractLevelDOWN
-var util = require('util')
-var Iterator = require('./iterator')
-var isBuffer = require('isbuffer')
-
-function Level(location) {
-  if (!(this instanceof Level)) return new Level(location)
-  if (!location) throw new Error("constructor requires at least a location argument")
-  
-  this.location = location
-}
-
-util.inherits(Level, AbstractLevelDOWN)
-
-Level.prototype._open = function(options, callback) {
-  var self = this
-  
-  this.idb = new IDB({
-    storeName: this.location,
-    autoIncrement: false,
-    keyPath: null,
-    onStoreReady: function () {
-      callback && callback(null, self.idb)
-    }, 
-    onError: function(err) {
-      callback && callback(err)
-    }
-  })
-}
-
-Level.prototype._get = function (key, options, callback) {
-  this.idb.get(key, function (value) {
-    if (value === undefined) {
-      // 'NotFound' error, consistent with LevelDOWN API
-      return callback(new Error('NotFound'))
-    }
-    if (options.asBuffer !== false && !isBuffer(value))
-      value = StringToArrayBuffer(String(value))
-    return callback(null, value, key)
-  }, callback)
-}
-
-Level.prototype._del = function(id, options, callback) {
-  this.idb.remove(id, callback, callback)
-}
-
-Level.prototype._put = function (key, value, options, callback) {
-  this.idb.put(key, value, function() { callback() }, callback)
-}
-
-Level.prototype.iterator = function (options) {
-  if (typeof options !== 'object') options = {}
-  return new Iterator(this.idb, options)
-}
-
-Level.prototype._batch = function (array, options, callback) {
-  var op
-    , i
-
-  for (i=0; i < array.length; i++) {
-    op = array[i]
-
-    if (op.type === 'del') {
-      op.type = 'remove'
-    }
-  }
-
-  return this.idb.batch(array, function(){ callback() }, callback)
-}
-
-Level.prototype._close = function (callback) {
-  this.idb.db.close()
-  callback()
-}
-
-Level.prototype._approximateSize = function() {
-  throw new Error('Not implemented')
-}
-
-Level.prototype._isBuffer = isBuffer
-
-var checkKeyValue = Level.prototype._checkKeyValue = function (obj, type) {
-  if (obj === null || obj === undefined)
-    return new Error(type + ' cannot be `null` or `undefined`')
-  if (obj === null || obj === undefined)
-    return new Error(type + ' cannot be `null` or `undefined`')
-  if (isBuffer(obj) && obj.byteLength === 0)
-    return new Error(type + ' cannot be an empty ArrayBuffer')
-  if (String(obj) === '')
-    return new Error(type + ' cannot be an empty String')
-  if (obj.length === 0)
-    return new Error(type + ' cannot be an empty Array')
-}
-
-function ArrayBufferToString(buf) {
-  return String.fromCharCode.apply(null, new Uint16Array(buf))
-}
-
-function StringToArrayBuffer(str) {
-  var buf = new ArrayBuffer(str.length * 2) // 2 bytes for each char
-  var bufView = new Uint16Array(buf)
-  for (var i = 0, strLen = str.length; i < strLen; i++) {
-    bufView[i] = str.charCodeAt(i)
-  }
-  return buf
-}
-
-},{"./iterator":13,"abstract-leveldown":16,"idb-wrapper":17,"isbuffer":18,"util":5}],13:[function(require,module,exports){
-var util = require('util')
-var AbstractIterator  = require('abstract-leveldown').AbstractIterator
-module.exports = Iterator
-
-function Iterator (db, options) {
-  if (!options) options = {}
-  this.options = options
-  AbstractIterator.call(this, db)
-  this._order = !!options.reverse ? 'DESC': 'ASC'
-  this._start = options.start
-  this._limit = options.limit
-  if (this._limit) this._count = 0
-  this._end   = options.end
-  this._done = false
-}
-
-util.inherits(Iterator, AbstractIterator)
-
-Iterator.prototype.createIterator = function() {
-  var lower, upper
-  var onlyStart = typeof this._start !== 'undefined' && typeof this._end === 'undefined'
-  var onlyEnd = typeof this._start === 'undefined' && typeof this._end !== 'undefined'
-  var startAndEnd = typeof this._start !== 'undefined' && typeof this._end !== 'undefined'
-  if (onlyStart) {
-    var index = this._start
-    if (this._order === 'ASC') {
-      lower = index
-    } else {
-      upper = index
-    }
-  } else if (onlyEnd) {
-    var index = this._end
-    if (this._order === 'DESC') {
-      lower = index
-    } else {
-      upper = index
-    }
-  } else if (startAndEnd) {
-    lower = this._start
-    upper = this._end
-    if (this._start > this._end) {
-      lower = this._end
-      upper = this._start
-    }
-  }
-  if (lower || upper) {
-    this._keyRange = this.options.keyRange || this.db.makeKeyRange({
-      lower: lower,
-      upper: upper
-      // TODO expose excludeUpper/excludeLower
-    })
-  }
-  this.iterator = this.db.iterate(this.onItem.bind(this), {
-    keyRange: this._keyRange,
-    autoContinue: false,
-    order: this._order,
-    onError: function(err) { console.log('horrible error', err) },
-  })
-}
-
-// TODO the limit implementation here just ignores all reads after limit has been reached
-// it should cancel the iterator instead but I don't know how
-Iterator.prototype.onItem = function (value, cursor, cursorTransaction) {
-  if (!cursor && this.callback) {
-    this.callback()
-    this.callback = false
-    return
-  }
-  if (this._limit && this._limit > 0) {
-    if (this._limit > this._count) this.callback(false, cursor.key, cursor.value)
-  } else {
-    this.callback(false, cursor.key, cursor.value)
-  }
-  if (this._limit) this._count++
-  if (cursor) cursor.continue()
-}
-
-Iterator.prototype._next = function (callback) {
-  if (!callback) return new Error('next() requires a callback argument')
-  if (!this._started) {
-    this.createIterator()
-    this._started = true
-  }
-  this.callback = callback
-}
-},{"abstract-leveldown":16,"util":5}],14:[function(require,module,exports){
-(function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
-
-function AbstractChainedBatch (db) {
-  this._db         = db
-  this._operations = []
-  this._written    = false
-}
-
-AbstractChainedBatch.prototype._checkWritten = function () {
-  if (this._written)
-    throw new Error('write() already called on this batch')
-}
-
-AbstractChainedBatch.prototype.put = function (key, value) {
-  this._checkWritten()
-
-  var err = this._db._checkKeyValue(key, 'key', this._db._isBuffer)
-  if (err) throw err
-  err = this._db._checkKeyValue(value, 'value', this._db._isBuffer)
-  if (err) throw err
-
-  if (!this._db._isBuffer(key)) key = String(key)
-  if (!this._db._isBuffer(value)) value = String(value)
-
-  this._operations.push({ type: 'put', key: key, value: value })
-
-  return this
-}
-
-AbstractChainedBatch.prototype.del = function (key) {
-  this._checkWritten()
-
-  var err = this._db._checkKeyValue(key, 'key', this._db._isBuffer)
-  if (err) throw err
-
-  if (!this._db._isBuffer(key)) key = String(key)
-
-  this._operations.push({ type: 'del', key: key })
-
-  return this
-}
-
-AbstractChainedBatch.prototype.clear = function () {
-  this._checkWritten()
-
-  this._operations = []
-  return this
-}
-
-AbstractChainedBatch.prototype.write = function (options, callback) {
-  this._checkWritten()
-
-  if (typeof options == 'function')
-    callback = options
-  if (typeof callback != 'function')
-    throw new Error('write() requires a callback argument')
-  if (typeof options != 'object')
-    options = {}
-
-  this._written = true
-
-  if (typeof this._db._batch == 'function')
-    return this._db._batch(this._operations, options, callback)
-
-  process.nextTick(callback)
-}
-
-module.exports = AbstractChainedBatch
-})(require("__browserify_process"))
-},{"__browserify_process":11}],15:[function(require,module,exports){
-(function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
-
-function AbstractIterator (db) {
-  this.db = db
-  this._ended = false
-  this._nexting = false
-}
-
-AbstractIterator.prototype.next = function (callback) {
-  var self = this
-
-  if (typeof callback != 'function')
-    throw new Error('next() requires a callback argument')
-
-  if (self._ended)
-    return callback(new Error('cannot call next() after end()'))
-  if (self._nexting)
-    return callback(new Error('cannot call next() before previous next() has completed'))
-
-  self._nexting = true
-  if (typeof self._next == 'function') {
-    return self._next(function () {
-      self._nexting = false
-      callback.apply(null, arguments)
-    })
-  }
-
-  process.nextTick(function () {
-    self._nexting = false
-    callback()
-  })
-}
-
-AbstractIterator.prototype.end = function (callback) {
-  if (typeof callback != 'function')
-    throw new Error('end() requires a callback argument')
-
-  if (this._ended)
-    return callback(new Error('end() already called on iterator'))
-
-  this._ended = true
-
-  if (typeof this._end == 'function')
-    return this._end(callback)
-
-  process.nextTick(callback)
-}
-
-module.exports = AbstractIterator
-
-})(require("__browserify_process"))
-},{"__browserify_process":11}],16:[function(require,module,exports){
-(function(process,Buffer){/* Copyright (c) 2013 Rod Vagg, MIT License */
-
-var AbstractIterator     = require('./abstract-iterator')
-  , AbstractChainedBatch = require('./abstract-chained-batch')
-
-function AbstractLevelDOWN (location) {
-  if (!arguments.length || location === undefined)
-    throw new Error('constructor requires at least a location argument')
-
-  if (typeof location != 'string')
-    throw new Error('constructor requires a location string argument')
-
-  this.location = location
-}
-
-AbstractLevelDOWN.prototype.open = function (options, callback) {
-  if (typeof options == 'function')
-    callback = options
-  if (typeof callback != 'function')
-    throw new Error('open() requires a callback argument')
-  if (typeof options != 'object')
-    options = {}
-
-  if (typeof this._open == 'function')
-    return this._open(options, callback)
-
-  process.nextTick(callback)
-}
-
-AbstractLevelDOWN.prototype.close = function (callback) {
-  if (typeof callback != 'function')
-    throw new Error('close() requires a callback argument')
-
-  if (typeof this._close == 'function')
-    return this._close(callback)
-
-  process.nextTick(callback)
-}
-
-AbstractLevelDOWN.prototype.get = function (key, options, callback) {
-  var self = this
-  if (typeof options == 'function')
-    callback = options
-  if (typeof callback != 'function')
-    throw new Error('get() requires a callback argument')
-  var err = self._checkKeyValue(key, 'key', self._isBuffer)
-  if (err) return callback(err)
-  if (!self._isBuffer(key)) key = String(key)
-  if (typeof options != 'object')
-    options = {}
-
-  if (typeof self._get == 'function')
-    return self._get(key, options, callback)
-
-  process.nextTick(function () { callback(new Error('NotFound')) })
-}
-
-AbstractLevelDOWN.prototype.put = function (key, value, options, callback) {
-  if (typeof options == 'function')
-    callback = options
-  if (typeof callback != 'function')
-    throw new Error('put() requires a callback argument')
-  var err = this._checkKeyValue(key, 'key', this._isBuffer)
-  if (err) return callback(err)
-  err = this._checkKeyValue(value, 'value', this._isBuffer)
-  if (err) return callback(err)
-  if (!this._isBuffer(key)) key = String(key)
-  // coerce value to string in node, dont touch it in browser
-  // (indexeddb can store any JS type)
-  if (!this._isBuffer(value) && !process.browser) value = String(value)
-  if (typeof options != 'object')
-    options = {}
-  if (typeof this._put == 'function')
-    return this._put(key, value, options, callback)
-
-  process.nextTick(callback)
-}
-
-AbstractLevelDOWN.prototype.del = function (key, options, callback) {
-  if (typeof options == 'function')
-    callback = options
-  if (typeof callback != 'function')
-    throw new Error('del() requires a callback argument')
-  var err = this._checkKeyValue(key, 'key', this._isBuffer)
-  if (err) return callback(err)
-  if (!this._isBuffer(key)) key = String(key)
-  if (typeof options != 'object')
-    options = {}
-
-
-  if (typeof this._del == 'function')
-    return this._del(key, options, callback)
-
-  process.nextTick(callback)
-}
-
-AbstractLevelDOWN.prototype.batch = function (array, options, callback) {
-  if (!arguments.length)
-    return this._chainedBatch()
-
-  if (typeof options == 'function')
-    callback = options
-  if (typeof callback != 'function')
-    throw new Error('batch(array) requires a callback argument')
-  if (!Array.isArray(array))
-    return callback(new Error('batch(array) requires an array argument'))
-  if (typeof options != 'object')
-    options = {}
-
-  var i = 0
-    , l = array.length
-    , e
-    , err
-
-  for (; i < l; i++) {
-    e = array[i]
-    if (typeof e != 'object') continue;
-
-    err = this._checkKeyValue(e.type, 'type', this._isBuffer)
-    if (err) return callback(err)
-
-    err = this._checkKeyValue(e.key, 'key', this._isBuffer)
-    if (err) return callback(err)
-
-    if (e.type == 'put') {
-      err = this._checkKeyValue(e.value, 'value', this._isBuffer)
-      if (err) return callback(err)
-    }
-  }
-
-  if (typeof this._batch == 'function')
-    return this._batch(array, options, callback)
-
-  process.nextTick(callback)
-}
-
-AbstractLevelDOWN.prototype.approximateSize = function (start, end, callback) {
-  if (start == null || end == null || typeof start == 'function' || typeof end == 'function')
-    throw new Error('approximateSize() requires valid `start`, `end` and `callback` arguments')
-  if (typeof callback != 'function')
-    throw new Error('approximateSize() requires a callback argument')
-
-  if (!this._isBuffer(start)) start = String(start)
-  if (!this._isBuffer(end)) end = String(end)
-  if (typeof this._approximateSize == 'function')
-    return this._approximateSize(start, end, callback)
-
-  process.nextTick(function () { callback(null, 0) })
-}
-
-AbstractLevelDOWN.prototype.iterator = function (options) {
-  if (typeof options != 'object')
-    options = {}
-
-  if (typeof this._iterator == 'function')
-    return this._iterator(options)
-
-  return new AbstractIterator(this)
-}
-
-AbstractLevelDOWN.prototype._chainedBatch = function () {
-  return new AbstractChainedBatch(this)
-}
-
-AbstractLevelDOWN.prototype._isBuffer = function (obj) {
-  return Buffer.isBuffer(obj)
-}
-
-AbstractLevelDOWN.prototype._checkKeyValue = function (obj, type) {
-  if (obj === null || obj === undefined)
-    return new Error(type + ' cannot be `null` or `undefined`')
-  if (obj === null || obj === undefined)
-    return new Error(type + ' cannot be `null` or `undefined`')
-  if (this._isBuffer(obj)) {
-    if (obj.length === 0)
-      return new Error(type + ' cannot be an empty Buffer')
-  } else if (String(obj) === '')
-    return new Error(type + ' cannot be an empty String')
-}
-
-module.exports.AbstractLevelDOWN = AbstractLevelDOWN
-module.exports.AbstractIterator  = AbstractIterator
-
-})(require("__browserify_process"),require("__browserify_Buffer").Buffer)
-},{"./abstract-chained-batch":14,"./abstract-iterator":15,"__browserify_Buffer":10,"__browserify_process":11}],17:[function(require,module,exports){
-(function(){/*jshint expr:true */
-/*global window:false, console:false, define:false, module:false */
-
-/**
- * @license IDBWrapper - A cross-browser wrapper for IndexedDB
- * Copyright (c) 2011 - 2013 Jens Arps
- * http://jensarps.de/
- *
- * Licensed under the MIT (X11) license
- */
-
-(function (name, definition, global) {
-  if (typeof define === 'function') {
-    define(definition);
-  } else if (typeof module !== 'undefined' && module.exports) {
-    module.exports = definition();
-  } else {
-    global[name] = definition();
-  }
-})('IDBStore', function () {
-
-  "use strict";
-
-  var defaults = {
-    storeName: 'Store',
-    storePrefix: 'IDBWrapper-',
-    dbVersion: 1,
-    keyPath: 'id',
-    autoIncrement: true,
-    onStoreReady: function () {
-    },
-    onError: function(error){
-      throw error;
-    },
-    indexes: []
-  };
-
-  /**
-   *
-   * The IDBStore constructor
-   *
-   * @constructor
-   * @name IDBStore
-   * @version 1.1.0
-   *
-   * @param {Object} [kwArgs] An options object used to configure the store and
-   *  set callbacks
-   * @param {String} [kwArgs.storeName='Store'] The name of the store
-   * @param {String} [kwArgs.storePrefix='IDBWrapper-'] A prefix that is
-   *  internally used to construct the name of the database, which will be
-   *  kwArgs.storePrefix + kwArgs.storeName
-   * @param {Number} [kwArgs.dbVersion=1] The version of the store
-   * @param {String} [kwArgs.keyPath='id'] The key path to use. If you want to
-   *  setup IDBWrapper to work with out-of-line keys, you need to set this to
-   *  `null`
-   * @param {Boolean} [kwArgs.autoIncrement=true] If set to true, IDBStore will
-   *  automatically make sure a unique keyPath value is present on each object
-   *  that is stored.
-   * @param {Function} [kwArgs.onStoreReady] A callback to be called when the
-   *  store is ready to be used.
-   * @param {Function} [kwArgs.onError=throw] A callback to be called when an
-   *  error occurred during instantiation of the store.
-   * @param {Array} [kwArgs.indexes=[]] An array of indexData objects
-   *  defining the indexes to use with the store. For every index to be used
-   *  one indexData object needs to be passed in the array.
-   *  An indexData object is defined as follows:
-   * @param {Object} [kwArgs.indexes.indexData] An object defining the index to
-   *  use
-   * @param {String} kwArgs.indexes.indexData.name The name of the index
-   * @param {String} [kwArgs.indexes.indexData.keyPath] The key path of the index
-   * @param {Boolean} [kwArgs.indexes.indexData.unique] Whether the index is unique
-   * @param {Boolean} [kwArgs.indexes.indexData.multiEntry] Whether the index is multi entry
-   * @param {Function} [onStoreReady] A callback to be called when the store
-   * is ready to be used.
-   * @example
-      // create a store for customers with an additional index over the
-      // `lastname` property.
-      var myCustomerStore = new IDBStore({
-        dbVersion: 1,
-        storeName: 'customer-index',
-        keyPath: 'customerid',
-        autoIncrement: true,
-        onStoreReady: populateTable,
-        indexes: [
-          { name: 'lastname', keyPath: 'lastname', unique: false, multiEntry: false }
-        ]
-      });
-   * @example
-      // create a generic store
-      var myCustomerStore = new IDBStore({
-        storeName: 'my-data-store',
-        onStoreReady: function(){
-          // start working with the store.
-        }
-      });
-   */
-  var IDBStore = function (kwArgs, onStoreReady) {
-
-    for(var key in defaults){
-      this[key] = typeof kwArgs[key] != 'undefined' ? kwArgs[key] : defaults[key];
-    }
-
-    this.dbName = this.storePrefix + this.storeName;
-    this.dbVersion = parseInt(this.dbVersion, 10);
-
-    onStoreReady && (this.onStoreReady = onStoreReady);
-
-    this.idb = window.indexedDB || window.webkitIndexedDB || window.mozIndexedDB;
-    this.keyRange = window.IDBKeyRange || window.webkitIDBKeyRange || window.mozIDBKeyRange;
-
-    this.consts = {
-      'READ_ONLY':         'readonly',
-      'READ_WRITE':        'readwrite',
-      'VERSION_CHANGE':    'versionchange',
-      'NEXT':              'next',
-      'NEXT_NO_DUPLICATE': 'nextunique',
-      'PREV':              'prev',
-      'PREV_NO_DUPLICATE': 'prevunique'
-    };
-
-    this.openDB();
-  };
-
-  IDBStore.prototype = /** @lends IDBStore */ {
-
-    /**
-     * The version of IDBStore
-     *
-     * @type String
-     */
-    version: '1.2.0',
-
-    /**
-     * A reference to the IndexedDB object
-     *
-     * @type Object
-     */
-    db: null,
-
-    /**
-     * The full name of the IndexedDB used by IDBStore, composed of
-     * this.storePrefix + this.storeName
-     *
-     * @type String
-     */
-    dbName: null,
-
-    /**
-     * The version of the IndexedDB used by IDBStore
-     *
-     * @type Number
-     */
-    dbVersion: null,
-
-    /**
-     * A reference to the objectStore used by IDBStore
-     *
-     * @type Object
-     */
-    store: null,
-
-    /**
-     * The store name
-     *
-     * @type String
-     */
-    storeName: null,
-
-    /**
-     * The key path
-     *
-     * @type String
-     */
-    keyPath: null,
-
-    /**
-     * Whether IDBStore uses autoIncrement
-     *
-     * @type Boolean
-     */
-    autoIncrement: null,
-
-    /**
-     * The indexes used by IDBStore
-     *
-     * @type Array
-     */
-    indexes: null,
-
-    /**
-     * A hashmap of features of the used IDB implementation
-     *
-     * @type Object
-     * @proprty {Boolean} autoIncrement If the implementation supports
-     *  native auto increment
-     */
-    features: null,
-
-    /**
-     * The callback to be called when the store is ready to be used
-     *
-     * @type Function
-     */
-    onStoreReady: null,
-
-    /**
-     * The callback to be called if an error occurred during instantiation
-     * of the store
-     *
-     * @type Function
-     */
-    onError: null,
-
-    /**
-     * The internal insertID counter
-     *
-     * @type Number
-     * @private
-     */
-    _insertIdCount: 0,
-
-    /**
-     * Opens an IndexedDB; called by the constructor.
-     *
-     * Will check if versions match and compare provided index configuration
-     * with existing ones, and update indexes if necessary.
-     *
-     * Will call this.onStoreReady() if everything went well and the store
-     * is ready to use, and this.onError() is something went wrong.
-     *
-     * @private
-     *
-     */
-    openDB: function () {
-
-      var features = this.features = {};
-      features.hasAutoIncrement = !window.mozIndexedDB;
-
-      var openRequest = this.idb.open(this.dbName, this.dbVersion);
-      var preventSuccessCallback = false;
-
-      openRequest.onerror = function (error) {
-
-        var gotVersionErr = false;
-        if ('error' in error.target) {
-          gotVersionErr = error.target.error.name == "VersionError";
-        } else if ('errorCode' in error.target) {
-          gotVersionErr = error.target.errorCode == 12;
-        }
-
-        if (gotVersionErr) {
-          this.onError(new Error('The version number provided is lower than the existing one.'));
-        } else {
-          this.onError(error);
-        }
-      }.bind(this);
-
-      openRequest.onsuccess = function (event) {
-
-        if (preventSuccessCallback) {
-          return;
-        }
-
-        if(this.db){
-          this.onStoreReady();
-          return;
-        }
-
-        this.db = event.target.result;
-
-        if(typeof this.db.version == 'string'){
-          this.onError(new Error('The IndexedDB implementation in this browser is outdated. Please upgrade your browser.'));
-          return;
-        }
-
-        if(!this.db.objectStoreNames.contains(this.storeName)){
-          // We should never ever get here.
-          // Lets notify the user anyway.
-          this.onError(new Error('Something is wrong with the IndexedDB implementation in this browser. Please upgrade your browser.'));
-          return;
-        }
-
-        var emptyTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
-        this.store = emptyTransaction.objectStore(this.storeName);
-
-        // check indexes
-        this.indexes.forEach(function(indexData){
-          var indexName = indexData.name;
-
-          if(!indexName){
-            preventSuccessCallback = true;
-            this.onError(new Error('Cannot create index: No index name given.'));
-            return;
-          }
-
-          this.normalizeIndexData(indexData);
-
-          if(this.hasIndex(indexName)){
-            // check if it complies
-            var actualIndex = this.store.index(indexName);
-            var complies = this.indexComplies(actualIndex, indexData);
-            if(!complies){
-              preventSuccessCallback = true;
-              this.onError(new Error('Cannot modify index "' + indexName + '" for current version. Please bump version number to ' + ( this.dbVersion + 1 ) + '.'));
-            }
-          } else {
-            preventSuccessCallback = true;
-            this.onError(new Error('Cannot create new index "' + indexName + '" for current version. Please bump version number to ' + ( this.dbVersion + 1 ) + '.'));
-          }
-
-        }, this);
-
-        preventSuccessCallback || this.onStoreReady();
-      }.bind(this);
-
-      openRequest.onupgradeneeded = function(/* IDBVersionChangeEvent */ event){
-
-        this.db = event.target.result;
-
-        if(this.db.objectStoreNames.contains(this.storeName)){
-          this.store = event.target.transaction.objectStore(this.storeName);
-        } else {
-          this.store = this.db.createObjectStore(this.storeName, { keyPath: this.keyPath, autoIncrement: this.autoIncrement});
-        }
-
-        this.indexes.forEach(function(indexData){
-          var indexName = indexData.name;
-
-          if(!indexName){
-            preventSuccessCallback = true;
-            this.onError(new Error('Cannot create index: No index name given.'));
-          }
-
-          this.normalizeIndexData(indexData);
-
-          if(this.hasIndex(indexName)){
-            // check if it complies
-            var actualIndex = this.store.index(indexName);
-            var complies = this.indexComplies(actualIndex, indexData);
-            if(!complies){
-              // index differs, need to delete and re-create
-              this.store.deleteIndex(indexName);
-              this.store.createIndex(indexName, indexData.keyPath, { unique: indexData.unique, multiEntry: indexData.multiEntry });
-            }
-          } else {
-            this.store.createIndex(indexName, indexData.keyPath, { unique: indexData.unique, multiEntry: indexData.multiEntry });
-          }
-
-        }, this);
-
-      }.bind(this);
-    },
-
-    /**
-     * Deletes the database used for this store if the IDB implementations
-     * provides that functionality.
-     */
-    deleteDatabase: function () {
-      if (this.idb.deleteDatabase) {
-        this.idb.deleteDatabase(this.dbName);
-      }
-    },
-
-    /*********************
-     * data manipulation *
-     *********************/
-
-    /**
-     * Puts an object into the store. If an entry with the given id exists,
-     * it will be overwritten. This method has a different signature for inline
-     * keys and out-of-line keys; please see the examples below.
-     *
-     * @param {*} [key] The key to store. This is only needed if IDBWrapper
-     *  is set to use out-of-line keys. For inline keys - the default scenario -
-     *  this can be omitted.
-     * @param {Object} value The data object to store.
-     * @param {Function} [onSuccess] A callback that is called if insertion
-     *  was successful.
-     * @param {Function} [onError] A callback that is called if insertion
-     *  failed.
-     * @example
-        // Storing an object, using inline keys (the default scenario):
-        var myCustomer = {
-          customerid: 2346223,
-          lastname: 'Doe',
-          firstname: 'John'
-        };
-        myCustomerStore.put(myCustomer, mySuccessHandler, myErrorHandler);
-        // Note that passing success- and error-handlers is optional.
-     * @example
-        // Storing an object, using out-of-line keys:
-       var myCustomer = {
-         lastname: 'Doe',
-         firstname: 'John'
-       };
-       myCustomerStore.put(2346223, myCustomer, mySuccessHandler, myErrorHandler);
-      // Note that passing success- and error-handlers is optional.
-     */
-    put: function (key, value, onSuccess, onError) {
-      if (this.keyPath !== null) {
-        onError = onSuccess;
-        onSuccess = value;
-        value = key;
-      }
-      onError || (onError = function (error) {
-        console.error('Could not write data.', error);
-      });
-      onSuccess || (onSuccess = noop);
-
-      var hasSuccess = false,
-          result = null,
-          putRequest;
-
-      var putTransaction = this.db.transaction([this.storeName], this.consts.READ_WRITE);
-      putTransaction.oncomplete = function () {
-        var callback = hasSuccess ? onSuccess : onError;
-        callback(result);
-      };
-      putTransaction.onabort = onError;
-      putTransaction.onerror = onError;
-
-      if (this.keyPath !== null) { // in-line keys
-        this._addIdPropertyIfNeeded(value);
-        putRequest = putTransaction.objectStore(this.storeName).put(value);
-      } else { // out-of-line keys
-        putRequest = putTransaction.objectStore(this.storeName).put(value, key);
-      }
-      putRequest.onsuccess = function (event) {
-        hasSuccess = true;
-        result = event.target.result;
-      };
-      putRequest.onerror = onError;
-    },
-
-    /**
-     * Retrieves an object from the store. If no entry exists with the given id,
-     * the success handler will be called with null as first and only argument.
-     *
-     * @param {*} key The id of the object to fetch.
-     * @param {Function} [onSuccess] A callback that is called if fetching
-     *  was successful. Will receive the object as only argument.
-     * @param {Function} [onError] A callback that will be called if an error
-     *  occurred during the operation.
-     */
-    get: function (key, onSuccess, onError) {
-      onError || (onError = function (error) {
-        console.error('Could not read data.', error);
-      });
-      onSuccess || (onSuccess = noop);
-
-      var hasSuccess = false,
-          result = null;
-      
-      var getTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
-      getTransaction.oncomplete = function () {
-        var callback = hasSuccess ? onSuccess : onError;
-        callback(result);
-      };
-      getTransaction.onabort = onError;
-      getTransaction.onerror = onError;
-      var getRequest = getTransaction.objectStore(this.storeName).get(key);
-      getRequest.onsuccess = function (event) {
-        hasSuccess = true;
-        result = event.target.result;
-      };
-      getRequest.onerror = onError;
-    },
-
-    /**
-     * Removes an object from the store.
-     *
-     * @param {*} key The id of the object to remove.
-     * @param {Function} [onSuccess] A callback that is called if the removal
-     *  was successful.
-     * @param {Function} [onError] A callback that will be called if an error
-     *  occurred during the operation.
-     */
-    remove: function (key, onSuccess, onError) {
-      onError || (onError = function (error) {
-        console.error('Could not remove data.', error);
-      });
-      onSuccess || (onSuccess = noop);
-
-      var hasSuccess = false,
-          result = null;
-
-      var removeTransaction = this.db.transaction([this.storeName], this.consts.READ_WRITE);
-      removeTransaction.oncomplete = function () {
-        var callback = hasSuccess ? onSuccess : onError;
-        callback(result);
-      };
-      removeTransaction.onabort = onError;
-      removeTransaction.onerror = onError;
-
-      var deleteRequest = removeTransaction.objectStore(this.storeName)['delete'](key);
-      deleteRequest.onsuccess = function (event) {
-        hasSuccess = true;
-        result = event.target.result;
-      };
-      deleteRequest.onerror = onError;
-    },
-
-    /**
-     * Runs a batch of put and/or remove operations on the store.
-     *
-     * @param {Array} dataArray An array of objects containing the operation to run
-     *  and the data object (for put operations).
-     * @param {Function} [onSuccess] A callback that is called if all operations
-     *  were successful.
-     * @param {Function} [onError] A callback that is called if an error
-     *  occurred during one of the operations.
-     */
-    batch: function (dataArray, onSuccess, onError) {
-      onError || (onError = function (error) {
-        console.error('Could not apply batch.', error);
-      });
-      onSuccess || (onSuccess = noop);
-
-      if(Object.prototype.toString.call(dataArray) != '[object Array]'){
-        onError(new Error('dataArray argument must be of type Array.'));
-      }
-      var batchTransaction = this.db.transaction([this.storeName] , this.consts.READ_WRITE);
-      batchTransaction.oncomplete = function () {
-        var callback = hasSuccess ? onSuccess : onError;
-        callback(hasSuccess);
-      };
-      batchTransaction.onabort = onError;
-      batchTransaction.onerror = onError;
-      
-      var count = dataArray.length;
-      var called = false;
-      var hasSuccess = false;
-
-      var onItemSuccess = function () {
-        count--;
-        if (count === 0 && !called) {
-          called = true;
-          hasSuccess = true;
-        }
-      };
-
-      dataArray.forEach(function (operation) {
-        var type = operation.type;
-        var key = operation.key;
-        var value = operation.value;
-
-        var onItemError = function (err) {
-          batchTransaction.abort();
-          if (!called) {
-            called = true;
-            onError(err, type, key);
-          }
-        };
-
-        if (type == "remove") {
-          var deleteRequest = batchTransaction.objectStore(this.storeName)['delete'](key);
-          deleteRequest.onsuccess = onItemSuccess;
-          deleteRequest.onerror = onItemError;
-        } else if (type == "put") {
-          var putRequest;
-          if (this.keyPath !== null) { // in-line keys
-            this._addIdPropertyIfNeeded(value);
-            putRequest = batchTransaction.objectStore(this.storeName).put(value);
-          } else { // out-of-line keys
-            putRequest = batchTransaction.objectStore(this.storeName).put(value, key);
-          }
-          putRequest.onsuccess = onItemSuccess;
-          putRequest.onerror = onItemError;
-        }
-      }, this);
-    },
-
-    /**
-     * Fetches all entries in the store.
-     *
-     * @param {Function} [onSuccess] A callback that is called if the operation
-     *  was successful. Will receive an array of objects.
-     * @param {Function} [onError] A callback that will be called if an error
-     *  occurred during the operation.
-     */
-    getAll: function (onSuccess, onError) {
-      onError || (onError = function (error) {
-        console.error('Could not read data.', error);
-      });
-      onSuccess || (onSuccess = noop);
-      var getAllTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
-      var store = getAllTransaction.objectStore(this.storeName);
-      if (store.getAll) {
-        this._getAllNative(getAllTransaction, store, onSuccess, onError);
-      } else {
-        this._getAllCursor(getAllTransaction, store, onSuccess, onError);
-      }
-    },
-
-    /**
-     * Implements getAll for IDB implementations that have a non-standard
-     * getAll() method.
-     *
-     * @param {Object} getAllTransaction An open READ transaction.
-     * @param {Object} store A reference to the store.
-     * @param {Function} onSuccess A callback that will be called if the
-     *  operation was successful.
-     * @param {Function} onError A callback that will be called if an
-     *  error occurred during the operation.
-     * @private
-     */
-    _getAllNative: function (getAllTransaction, store, onSuccess, onError) {
-      var hasSuccess = false,
-          result = null;
-
-      getAllTransaction.oncomplete = function () {
-        var callback = hasSuccess ? onSuccess : onError;
-        callback(result);
-      };
-      getAllTransaction.onabort = onError;
-      getAllTransaction.onerror = onError;
-
-      var getAllRequest = store.getAll();
-      getAllRequest.onsuccess = function (event) {
-        hasSuccess = true;
-        result = event.target.result;
-      };
-      getAllRequest.onerror = onError;
-    },
-
-    /**
-     * Implements getAll for IDB implementations that do not have a getAll()
-     * method.
-     *
-     * @param {Object} getAllTransaction An open READ transaction.
-     * @param {Object} store A reference to the store.
-     * @param {Function} onSuccess A callback that will be called if the
-     *  operation was successful.
-     * @param {Function} onError A callback that will be called if an
-     *  error occurred during the operation.
-     * @private
-     */
-    _getAllCursor: function (getAllTransaction, store, onSuccess, onError) {
-      var all = [],
-          hasSuccess = false,
-          result = null;
-
-      getAllTransaction.oncomplete = function () {
-        var callback = hasSuccess ? onSuccess : onError;
-        callback(result);
-      };
-      getAllTransaction.onabort = onError;
-      getAllTransaction.onerror = onError;
-
-      var cursorRequest = store.openCursor();
-      cursorRequest.onsuccess = function (event) {
-        var cursor = event.target.result;
-        if (cursor) {
-          all.push(cursor.value);
-          cursor['continue']();
-        }
-        else {
-          hasSuccess = true;
-          result = all;
-        }
-      };
-      cursorRequest.onError = onError;
-    },
-
-    /**
-     * Clears the store, i.e. deletes all entries in the store.
-     *
-     * @param {Function} [onSuccess] A callback that will be called if the
-     *  operation was successful.
-     * @param {Function} [onError] A callback that will be called if an
-     *  error occurred during the operation.
-     */
-    clear: function (onSuccess, onError) {
-      onError || (onError = function (error) {
-        console.error('Could not clear store.', error);
-      });
-      onSuccess || (onSuccess = noop);
-
-      var hasSuccess = false,
-          result = null;
-
-      var clearTransaction = this.db.transaction([this.storeName], this.consts.READ_WRITE);
-      clearTransaction.oncomplete = function () {
-        var callback = hasSuccess ? onSuccess : onError;
-        callback(result);
-      };
-      clearTransaction.onabort = onError;
-      clearTransaction.onerror = onError;
-
-      var clearRequest = clearTransaction.objectStore(this.storeName).clear();
-      clearRequest.onsuccess = function (event) {
-        hasSuccess = true;
-        result = event.target.result;
-      };
-      clearRequest.onerror = onError;
-    },
-
-    /**
-     * Checks if an id property needs to present on a object and adds one if
-     * necessary.
-     *
-     * @param {Object} dataObj The data object that is about to be stored
-     * @private
-     */
-    _addIdPropertyIfNeeded: function (dataObj) {
-      if (!this.features.hasAutoIncrement && typeof dataObj[this.keyPath] == 'undefined') {
-        dataObj[this.keyPath] = this._insertIdCount++ + Date.now();
-      }
-    },
-
-    /************
-     * indexing *
-     ************/
-
-    /**
-     * Returns a DOMStringList of index names of the store.
-     *
-     * @return {DOMStringList} The list of index names
-     */
-    getIndexList: function () {
-      return this.store.indexNames;
-    },
-
-    /**
-     * Checks if an index with the given name exists in the store.
-     *
-     * @param {String} indexName The name of the index to look for
-     * @return {Boolean} Whether the store contains an index with the given name
-     */
-    hasIndex: function (indexName) {
-      return this.store.indexNames.contains(indexName);
-    },
-
-    /**
-     * Normalizes an object containing index data and assures that all
-     * properties are set.
-     *
-     * @param {Object} indexData The index data object to normalize
-     * @param {String} indexData.name The name of the index
-     * @param {String} [indexData.keyPath] The key path of the index
-     * @param {Boolean} [indexData.unique] Whether the index is unique
-     * @param {Boolean} [indexData.multiEntry] Whether the index is multi entry
-     */
-    normalizeIndexData: function (indexData) {
-      indexData.keyPath = indexData.keyPath || indexData.name;
-      indexData.unique = !!indexData.unique;
-      indexData.multiEntry = !!indexData.multiEntry;
-    },
-
-    /**
-     * Checks if an actual index complies with an expected index.
-     *
-     * @param {Object} actual The actual index found in the store
-     * @param {Object} expected An Object describing an expected index
-     * @return {Boolean} Whether both index definitions are identical
-     */
-    indexComplies: function (actual, expected) {
-      var complies = ['keyPath', 'unique', 'multiEntry'].every(function (key) {
-        // IE10 returns undefined for no multiEntry
-        if (key == 'multiEntry' && actual[key] === undefined && expected[key] === false) {
-          return true;
-        }
-        return expected[key] == actual[key];
-      });
-      return complies;
-    },
-
-    /**********
-     * cursor *
-     **********/
-
-    /**
-     * Iterates over the store using the given options and calling onItem
-     * for each entry matching the options.
-     *
-     * @param {Function} onItem A callback to be called for each match
-     * @param {Object} [options] An object defining specific options
-     * @param {Object} [options.index=null] An IDBIndex to operate on
-     * @param {String} [options.order=ASC] The order in which to provide the
-     *  results, can be 'DESC' or 'ASC'
-     * @param {Boolean} [options.autoContinue=true] Whether to automatically
-     *  iterate the cursor to the next result
-     * @param {Boolean} [options.filterDuplicates=false] Whether to exclude
-     *  duplicate matches
-     * @param {Object} [options.keyRange=null] An IDBKeyRange to use
-     * @param {Boolean} [options.writeAccess=false] Whether grant write access
-     *  to the store in the onItem callback
-     * @param {Function} [options.onEnd=null] A callback to be called after
-     *  iteration has ended
-     * @param {Function} [options.onError=console.error] A callback to be called
-     *  if an error occurred during the operation.
-     */
-    iterate: function (onItem, options) {
-      options = mixin({
-        index: null,
-        order: 'ASC',
-        autoContinue: true,
-        filterDuplicates: false,
-        keyRange: null,
-        writeAccess: false,
-        onEnd: null,
-        onError: function (error) {
-          console.error('Could not open cursor.', error);
-        }
-      }, options || {});
-
-      var directionType = options.order.toLowerCase() == 'desc' ? 'PREV' : 'NEXT';
-      if (options.filterDuplicates) {
-        directionType += '_NO_DUPLICATE';
-      }
-
-      var hasSuccess = false;
-      var cursorTransaction = this.db.transaction([this.storeName], this.consts[options.writeAccess ? 'READ_WRITE' : 'READ_ONLY']);
-      var cursorTarget = cursorTransaction.objectStore(this.storeName);
-      if (options.index) {
-        cursorTarget = cursorTarget.index(options.index);
-      }
-
-      cursorTransaction.oncomplete = function () {
-        if (!hasSuccess) {
-          options.onError(null);
-          return;
-        }
-        if (options.onEnd) {
-          options.onEnd();
-        } else {
-          onItem(null);
-        }
-      };
-      cursorTransaction.onabort = options.onError;
-      cursorTransaction.onerror = options.onError;
-
-      var cursorRequest = cursorTarget.openCursor(options.keyRange, this.consts[directionType]);
-      cursorRequest.onerror = options.onError;
-      cursorRequest.onsuccess = function (event) {
-        var cursor = event.target.result;
-        if (cursor) {
-          onItem(cursor.value, cursor, cursorTransaction);
-          if (options.autoContinue) {
-            cursor['continue']();
-          }
-        } else {
-          hasSuccess = true;
-        }
-      };
-    },
-
-    /**
-     * Runs a query against the store and passes an array containing matched
-     * objects to the success handler.
-     *
-     * @param {Function} onSuccess A callback to be called when the operation
-     *  was successful.
-     * @param {Object} [options] An object defining specific query options
-     * @param {Object} [options.index=null] An IDBIndex to operate on
-     * @param {String} [options.order=ASC] The order in which to provide the
-     *  results, can be 'DESC' or 'ASC'
-     * @param {Boolean} [options.filterDuplicates=false] Whether to exclude
-     *  duplicate matches
-     * @param {Object} [options.keyRange=null] An IDBKeyRange to use
-     * @param {Function} [options.onError=console.error] A callback to be called if an error
-     *  occurred during the operation.
-     */
-    query: function (onSuccess, options) {
-      var result = [];
-      options = options || {};
-      options.onEnd = function () {
-        onSuccess(result);
-      };
-      this.iterate(function (item) {
-        result.push(item);
-      }, options);
-    },
-
-    /**
-     *
-     * Runs a query against the store, but only returns the number of matches
-     * instead of the matches itself.
-     *
-     * @param {Function} onSuccess A callback to be called if the opration
-     *  was successful.
-     * @param {Object} [options] An object defining specific options
-     * @param {Object} [options.index=null] An IDBIndex to operate on
-     * @param {Object} [options.keyRange=null] An IDBKeyRange to use
-     * @param {Function} [options.onError=console.error] A callback to be called if an error
-     *  occurred during the operation.
-     */
-    count: function (onSuccess, options) {
-
-      options = mixin({
-        index: null,
-        keyRange: null
-      }, options || {});
-
-      var onError = options.onError || function (error) {
-        console.error('Could not open cursor.', error);
-      };
-
-      var hasSuccess = false,
-          result = null;
-
-      var cursorTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
-      cursorTransaction.oncomplete = function () {
-        var callback = hasSuccess ? onSuccess : onError;
-        callback(result);
-      };
-      cursorTransaction.onabort = onError;
-      cursorTransaction.onerror = onError;
-
-      var cursorTarget = cursorTransaction.objectStore(this.storeName);
-      if (options.index) {
-        cursorTarget = cursorTarget.index(options.index);
-      }
-      var countRequest = cursorTarget.count(options.keyRange);
-      countRequest.onsuccess = function (evt) {
-        hasSuccess = true;
-        result = evt.target.result;
-      };
-      countRequest.onError = onError;
-    },
-
-    /**************/
-    /* key ranges */
-    /**************/
-
-    /**
-     * Creates a key range using specified options. This key range can be
-     * handed over to the count() and iterate() methods.
-     *
-     * Note: You must provide at least one or both of "lower" or "upper" value.
-     *
-     * @param {Object} options The options for the key range to create
-     * @param {*} [options.lower] The lower bound
-     * @param {Boolean} [options.excludeLower] Whether to exclude the lower
-     *  bound passed in options.lower from the key range
-     * @param {*} [options.upper] The upper bound
-     * @param {Boolean} [options.excludeUpper] Whether to exclude the upper
-     *  bound passed in options.upper from the key range
-     * @return {Object} The IDBKeyRange representing the specified options
-     */
-    makeKeyRange: function(options){
-      /*jshint onecase:true */
-      var keyRange,
-          hasLower = typeof options.lower != 'undefined',
-          hasUpper = typeof options.upper != 'undefined';
-
-      switch(true){
-        case hasLower && hasUpper:
-          keyRange = this.keyRange.bound(options.lower, options.upper, options.excludeLower, options.excludeUpper);
-          break;
-        case hasLower:
-          keyRange = this.keyRange.lowerBound(options.lower, options.excludeLower);
-          break;
-        case hasUpper:
-          keyRange = this.keyRange.upperBound(options.upper, options.excludeUpper);
-          break;
-        default:
-          throw new Error('Cannot create KeyRange. Provide one or both of "lower" or "upper" value.');
-      }
-
-      return keyRange;
-
-    }
-
-  };
-
-  /** helpers **/
-
-  var noop = function () {
-  };
-  var empty = {};
-  var mixin = function (target, source) {
-    var name, s;
-    for (name in source) {
-      s = source[name];
-      if (s !== empty[name] && s !== target[name]) {
-        target[name] = s;
-      }
-    }
-    return target;
-  };
-
-  IDBStore.version = IDBStore.prototype.version;
-
-  return IDBStore;
-
-}, this);
-
-})()
-},{}],18:[function(require,module,exports){
-(function(){var Buffer = require('buffer').Buffer;
-
-module.exports = isBuffer;
-
-function isBuffer (o) {
-  return Buffer.isBuffer(o)
-    || /\[object (.+Array|Array.+)\]/.test(Object.prototype.toString.call(o));
-}
-
-})()
-},{"buffer":7}],19:[function(require,module,exports){
-(function(process){var EventEmitter = require('events').EventEmitter
-var next         = process.nextTick
-var SubDb        = require('./sub')
-var fixRange     = require('level-fix-range')
-
-var Hooks   = require('level-hooks')
-
-module.exports   = function (db, options) {
-  if (db.sublevel) return db
-
-  options = options || {}
-
-  //use \xff (255) as the seperator,
-  //so that sections of the database will sort after the regular keys
-  var sep = options.sep = options.sep || '\xff'
-  db._options = options
-
-  Hooks(db)
-
-  db.sublevels = {}
-
-  db.sublevel = function (prefix, options) {
-    if(db.sublevels[prefix])
-      return db.sublevels[prefix]
-    return new SubDb(db, prefix, options || this._options)
-  }
-
-  db.methods = {}
-
-  db.prefix = function (key) {
-    return '' + (key || '')
-  }
-
-  db.pre = function (range, hook) {
-    if(!hook)
-      hook = range, range = {
-        max  : sep
-      }
-    return db.hooks.pre(range, hook)
-  }
-
-  db.post = function (range, hook) {
-    if(!hook)
-      hook = range, range = {
-        max : sep
-      }
-    return db.hooks.post(range, hook)
-  }
-
-  function safeRange(fun) {
-    return function (opts) {
-      opts = opts || {}
-      fixRange(opts)
-
-      if(opts.reverse) opts.start = opts.start || sep
-      else             opts.end   = opts.end || sep
-
-      return fun.call(db, opts)
-    }
-  }
-
-  db.readStream =
-  db.createReadStream  = safeRange(db.createReadStream)
-  db.keyStream =
-  db.createKeyStream   = safeRange(db.createKeyStream)
-  db.valuesStream =
-  db.createValueStream = safeRange(db.createValueStream)
-  
-  var batch = db.batch
-  db.batch = function (changes, opts, cb) {
-    if(!Array.isArray(changes))
-      throw new Error('batch must be passed an Array')
-    changes.forEach(function (e) {
-      if(e.prefix) {
-        if('function' === typeof e.prefix.prefix)
-          e.key = e.prefix.prefix(e.key)
-        else if('string'  === typeof e.prefix)
-          e.key = e.prefix + e.key
-      }
-    })
-    batch.call(db, changes, opts, cb)
-  }
-  return db
-}
-
-
-})(require("__browserify_process"))
-},{"./sub":29,"__browserify_process":11,"events":3,"level-fix-range":20,"level-hooks":21}],20:[function(require,module,exports){
-
-module.exports = 
-function fixRange(opts) {
-  var reverse = opts.reverse
-  var end     = opts.max || opts.end
-  var start   = opts.min || opts.start
-
-  var range = [start, end]
-  if(start != null && end != null)
-    range.sort()
-  if(reverse)
-    range = range.reverse()
-
-  opts.start   = range[0]
-  opts.end     = range[1]
-
-  delete opts.min
-  delete opts.max
-
-  return opts
-}
-
-
-},{}],21:[function(require,module,exports){
-var ranges = require('string-range')
-
-module.exports = function (db) {
-
-  if(db.hooks) {
-    return     
-  }
-
-  var posthooks = []
-  var prehooks  = []
-
-  function getPrefix (p) {
-    return p && (
-        'string' ===   typeof p        ? p
-      : 'string' ===   typeof p.prefix ? p.prefix
-      : 'function' === typeof p.prefix ? p.prefix()
-      :                                  ''
-      )
-  }
-
-  function getKeyEncoding (db) {
-    if(db && db._getKeyEncoding)
-      return db._getKeyEncoding(db)
-  }
-
-  function getValueEncoding (db) {
-    if(db && db._getValueEncoding)
-      return db._getValueEncoding(db)
-  }
-
-  function remover (array, item) {
-    return function () {
-      var i = array.indexOf(item)
-      if(!~i) return false        
-      array.splice(i, 1)
-      return true
-    }
-  }
-
-  db.hooks = {
-    post: function (prefix, hook) {
-      if(!hook) hook = prefix, prefix = ''
-      var h = {test: ranges.checker(prefix), hook: hook}
-      posthooks.push(h)
-      return remover(posthooks, h)
-    },
-    pre: function (prefix, hook) {
-      if(!hook) hook = prefix, prefix = ''
-      var h = {test: ranges.checker(prefix), hook: hook}
-      prehooks.push(h)
-      return remover(prehooks, h)
-    },
-    posthooks: posthooks,
-    prehooks: prehooks
-  }
-
-  //POST HOOKS
-
-  function each (e) {
-    if(e && e.type) {
-      posthooks.forEach(function (h) {
-        if(h.test(e.key)) h.hook(e)
-      })
-    }
-  }
-
-  db.on('put', function (key, val) {
-    each({type: 'put', key: key, value: val})
-  })
-  db.on('del', function (key, val) {
-    each({type: 'del', key: key, value: val})
-  })
-  db.on('batch', function onBatch (ary) {
-    ary.forEach(each)
-  })
-
-  //PRE HOOKS
-
-  var put = db.put
-  var del = db.del
-  var batch = db.batch
-
-  function callHooks (isBatch, b, opts, cb) {
-    try {
-    b.forEach(function hook(e, i) {
-      prehooks.forEach(function (h) {
-        if(h.test(String(e.key))) {
-          //optimize this?
-          //maybe faster to not create a new object each time?
-          //have one object and expose scope to it?
-          var context = {
-            add: function (ch, db) {
-              if(typeof ch === 'undefined') {
-                return this
-              }
-              if(ch === false)
-                return delete b[i]
-              var prefix = (
-                getPrefix(ch.prefix) || 
-                getPrefix(db) || 
-                h.prefix || ''
-              )
-              ch.key = prefix + ch.key
-              if(h.test(String(ch.key))) {
-                //this usually means a stack overflow.
-                throw new Error('prehook cannot insert into own range')
-              }
-              var ke = ch.keyEncoding   || getKeyEncoding(ch.prefix)
-              var ve = ch.valueEncoding || getValueEncoding(ch.prefix)
-              if(ke) ch.keyEncoding = ke
-              if(ve) ch.valueEncoding = ve
-
-              b.push(ch)
-              hook(ch, b.length - 1)
-              return this
-            },
-            put: function (ch, db) {
-              if('object' === typeof ch) ch.type = 'put'
-              return this.add(ch, db)
-            },
-            del: function (ch, db) {
-              if('object' === typeof ch) ch.type = 'del'
-              return this.add(ch, db)
-            },
-            veto: function () {
-              return this.add(false)
-            }
-          }
-          h.hook.call(context, e, context.add, b)
-        }
-      })
-    })
-    } catch (err) {
-      return (cb || opts)(err)
-    }
-    b = b.filter(function (e) {
-      return e && e.type //filter out empty items
-    })
-
-    if(b.length == 1 && !isBatch) {
-      var change = b[0]
-      return change.type == 'put' 
-        ? put.call(db, change.key, change.value, opts, cb) 
-        : del.call(db, change.key, opts, cb)  
-    }
-    return batch.call(db, b, opts, cb)
-  }
-
-  db.put = function (key, value, opts, cb ) {
-    var batch = [{key: key, value: value, type: 'put'}]
-    return callHooks(false, batch, opts, cb)
-  }
-
-  db.del = function (key, opts, cb) {
-    var batch = [{key: key, type: 'del'}]
-    return callHooks(false, batch, opts, cb)
-  }
-
-  db.batch = function (batch, opts, cb) {
-    return callHooks(true, batch, opts, cb)
-  }
-}
-
-},{"string-range":22}],22:[function(require,module,exports){
-
-//force to a valid range
-var range = exports.range = function (obj) {
-  return null == obj ? {} : 'string' === typeof range ? {
-      min: range, max: range + '\xff'
-    } :  obj
-}
-
-//turn into a sub range.
-var prefix = exports.prefix = function (range, within, term) {
-  range = exports.range(range)
-  var _range = {}
-  term = term || '\xff'
-  if(range instanceof RegExp || 'function' == typeof range) {
-    _range.min = within
-    _range.max   = within + term,
-    _range.inner = function (k) {
-      var j = k.substring(within.length)
-      if(range.test)
-        return range.test(j)
-      return range(j)
-    }
-  }
-  else if('object' === typeof range) {
-    _range.min = within + (range.min || range.start || '')
-    _range.max = within + (range.max || range.end   || (term || '~'))
-    _range.reverse = !!range.reverse
-  }
-  return _range
-}
-
-//return a function that checks a range
-var checker = exports.checker = function (range) {
-  if(!range) range = {}
-
-  if ('string' === typeof range)
-    return function (key) {
-      return key.indexOf(range) == 0
-    }
-  else if(range instanceof RegExp)
-    return function (key) {
-      return range.test(key)
-    }
-  else if('object' === typeof range)
-    return function (key) {
-      var min = range.min || range.start
-      var max = range.max || range.end
-
-      // fixes keys passed as ints from sublevels
-      key = String(key)
-
-      return (
-        !min || key >= min
-      ) && (
-        !max || key <= max
-      ) && (
-        !range.inner || (
-          range.inner.test 
-            ? range.inner.test(key)
-            : range.inner(key)
-        )
-      )
-    }
-  else if('function' === typeof range)
-    return range
-}
-//check if a key is within a range.
-var satifies = exports.satisfies = function (key, range) {
-  return checker(range)(key)
-}
-
-
-
-},{}],23:[function(require,module,exports){
-module.exports = hasKeys
-
-function hasKeys(source) {
-    return source !== null &&
-        (typeof source === "object" ||
-        typeof source === "function")
-}
-
-},{}],24:[function(require,module,exports){
-var Keys = require("object-keys")
-var hasKeys = require("./has-keys")
-
-module.exports = extend
-
-function extend() {
-    var target = {}
-
-    for (var i = 0; i < arguments.length; i++) {
-        var source = arguments[i]
-
-        if (!hasKeys(source)) {
-            continue
-        }
-
-        var keys = Keys(source)
-
-        for (var j = 0; j < keys.length; j++) {
-            var name = keys[j]
-            target[name] = source[name]
-        }
-    }
-
-    return target
-}
-
-},{"./has-keys":23,"object-keys":25}],25:[function(require,module,exports){
-module.exports = Object.keys || require('./shim');
-
-
-},{"./shim":28}],26:[function(require,module,exports){
-
-var hasOwn = Object.prototype.hasOwnProperty;
-
-module.exports = function forEach (obj, fn, ctx) {
-    if (typeof fn !== 'function') {
-        throw new TypeError('iterator must be a function');
-    }
-    var l = obj.length;
-    if (l === +l) {
-        for (var i = 0; i < l; i++) {
-            fn.call(ctx, obj[i], i, obj);
-        }
-    } else {
-        for (var k in obj) {
-            if (hasOwn.call(obj, k)) {
-                fn.call(ctx, obj[k], k, obj);
-            }
-        }
-    }
-};
-
-
-},{}],27:[function(require,module,exports){
-
-/**!
- * is
- * the definitive JavaScript type testing library
- * 
- * @copyright 2013 Enrico Marino
- * @license MIT
- */
-
-var objProto = Object.prototype;
-var owns = objProto.hasOwnProperty;
-var toString = objProto.toString;
-var isActualNaN = function (value) {
-  return value !== value;
-};
-var NON_HOST_TYPES = {
-  "boolean": 1,
-  "number": 1,
-  "string": 1,
-  "undefined": 1
-};
-
-/**
- * Expose `is`
- */
-
-var is = module.exports = {};
-
-/**
- * Test general.
- */
-
-/**
- * is.type
- * Test if `value` is a type of `type`.
- *
- * @param {Mixed} value value to test
- * @param {String} type type
- * @return {Boolean} true if `value` is a type of `type`, false otherwise
- * @api public
- */
-
-is.a =
-is.type = function (value, type) {
-  return typeof value === type;
-};
-
-/**
- * is.defined
- * Test if `value` is defined.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if 'value' is defined, false otherwise
- * @api public
- */
-
-is.defined = function (value) {
-  return value !== undefined;
-};
-
-/**
- * is.empty
- * Test if `value` is empty.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is empty, false otherwise
- * @api public
- */
-
-is.empty = function (value) {
-  var type = toString.call(value);
-  var key;
-
-  if ('[object Array]' === type || '[object Arguments]' === type) {
-    return value.length === 0;
-  }
-
-  if ('[object Object]' === type) {
-    for (key in value) if (owns.call(value, key)) return false;
-    return true;
-  }
-
-  if ('[object String]' === type) {
-    return '' === value;
-  }
-
-  return false;
-};
-
-/**
- * is.equal
- * Test if `value` is equal to `other`.
- *
- * @param {Mixed} value value to test
- * @param {Mixed} other value to compare with
- * @return {Boolean} true if `value` is equal to `other`, false otherwise
- */
-
-is.equal = function (value, other) {
-  var type = toString.call(value)
-  var key;
-
-  if (type !== toString.call(other)) {
-    return false;
-  }
-
-  if ('[object Object]' === type) {
-    for (key in value) {
-      if (!is.equal(value[key], other[key])) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  if ('[object Array]' === type) {
-    key = value.length;
-    if (key !== other.length) {
-      return false;
-    }
-    while (--key) {
-      if (!is.equal(value[key], other[key])) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  if ('[object Function]' === type) {
-    return value.prototype === other.prototype;
-  }
-
-  if ('[object Date]' === type) {
-    return value.getTime() === other.getTime();
-  }
-
-  return value === other;
-};
-
-/**
- * is.hosted
- * Test if `value` is hosted by `host`.
- *
- * @param {Mixed} value to test
- * @param {Mixed} host host to test with
- * @return {Boolean} true if `value` is hosted by `host`, false otherwise
- * @api public
- */
-
-is.hosted = function (value, host) {
-  var type = typeof host[value];
-  return type === 'object' ? !!host[value] : !NON_HOST_TYPES[type];
-};
-
-/**
- * is.instance
- * Test if `value` is an instance of `constructor`.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an instance of `constructor`
- * @api public
- */
-
-is.instance = is['instanceof'] = function (value, constructor) {
-  return value instanceof constructor;
-};
-
-/**
- * is.null
- * Test if `value` is null.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is null, false otherwise
- * @api public
- */
-
-is['null'] = function (value) {
-  return value === null;
-};
-
-/**
- * is.undefined
- * Test if `value` is undefined.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is undefined, false otherwise
- * @api public
- */
-
-is.undefined = function (value) {
-  return value === undefined;
-};
-
-/**
- * Test arguments.
- */
-
-/**
- * is.arguments
- * Test if `value` is an arguments object.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an arguments object, false otherwise
- * @api public
- */
-
-is.arguments = function (value) {
-  var isStandardArguments = '[object Arguments]' === toString.call(value);
-  var isOldArguments = !is.array(value) && is.arraylike(value) && is.object(value) && is.fn(value.callee);
-  return isStandardArguments || isOldArguments;
-};
-
-/**
- * Test array.
- */
-
-/**
- * is.array
- * Test if 'value' is an array.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an array, false otherwise
- * @api public
- */
-
-is.array = function (value) {
-  return '[object Array]' === toString.call(value);
-};
-
-/**
- * is.arguments.empty
- * Test if `value` is an empty arguments object.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an empty arguments object, false otherwise
- * @api public
- */
-is.arguments.empty = function (value) {
-  return is.arguments(value) && value.length === 0;
-};
-
-/**
- * is.array.empty
- * Test if `value` is an empty array.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an empty array, false otherwise
- * @api public
- */
-is.array.empty = function (value) {
-  return is.array(value) && value.length === 0;
-};
-
-/**
- * is.arraylike
- * Test if `value` is an arraylike object.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an arguments object, false otherwise
- * @api public
- */
-
-is.arraylike = function (value) {
-  return !!value && !is.boolean(value)
-    && owns.call(value, 'length')
-    && isFinite(value.length)
-    && is.number(value.length)
-    && value.length >= 0;
-};
-
-/**
- * Test boolean.
- */
-
-/**
- * is.boolean
- * Test if `value` is a boolean.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is a boolean, false otherwise
- * @api public
- */
-
-is.boolean = function (value) {
-  return '[object Boolean]' === toString.call(value);
-};
-
-/**
- * is.false
- * Test if `value` is false.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is false, false otherwise
- * @api public
- */
-
-is['false'] = function (value) {
-  return is.boolean(value) && (value === false || value.valueOf() === false);
-};
-
-/**
- * is.true
- * Test if `value` is true.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is true, false otherwise
- * @api public
- */
-
-is['true'] = function (value) {
-  return is.boolean(value) && (value === true || value.valueOf() === true);
-};
-
-/**
- * Test date.
- */
-
-/**
- * is.date
- * Test if `value` is a date.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is a date, false otherwise
- * @api public
- */
-
-is.date = function (value) {
-  return '[object Date]' === toString.call(value);
-};
-
-/**
- * Test element.
- */
-
-/**
- * is.element
- * Test if `value` is an html element.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an HTML Element, false otherwise
- * @api public
- */
-
-is.element = function (value) {
-  return value !== undefined
-    && typeof HTMLElement !== 'undefined'
-    && value instanceof HTMLElement
-    && value.nodeType === 1;
-};
-
-/**
- * Test error.
- */
-
-/**
- * is.error
- * Test if `value` is an error object.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an error object, false otherwise
- * @api public
- */
-
-is.error = function (value) {
-  return '[object Error]' === toString.call(value);
-};
-
-/**
- * Test function.
- */
-
-/**
- * is.fn / is.function (deprecated)
- * Test if `value` is a function.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is a function, false otherwise
- * @api public
- */
-
-is.fn = is['function'] = function (value) {
-  var isAlert = typeof window !== 'undefined' && value === window.alert;
-  return isAlert || '[object Function]' === toString.call(value);
-};
-
-/**
- * Test number.
- */
-
-/**
- * is.number
- * Test if `value` is a number.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is a number, false otherwise
- * @api public
- */
-
-is.number = function (value) {
-  return '[object Number]' === toString.call(value);
-};
-
-/**
- * is.infinite
- * Test if `value` is positive or negative infinity.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is positive or negative Infinity, false otherwise
- * @api public
- */
-is.infinite = function (value) {
-  return value === Infinity || value === -Infinity;
-};
-
-/**
- * is.decimal
- * Test if `value` is a decimal number.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is a decimal number, false otherwise
- * @api public
- */
-
-is.decimal = function (value) {
-  return is.number(value) && !isActualNaN(value) && value % 1 !== 0;
-};
-
-/**
- * is.divisibleBy
- * Test if `value` is divisible by `n`.
- *
- * @param {Number} value value to test
- * @param {Number} n dividend
- * @return {Boolean} true if `value` is divisible by `n`, false otherwise
- * @api public
- */
-
-is.divisibleBy = function (value, n) {
-  var isDividendInfinite = is.infinite(value);
-  var isDivisorInfinite = is.infinite(n);
-  var isNonZeroNumber = is.number(value) && !isActualNaN(value) && is.number(n) && !isActualNaN(n) && n !== 0;
-  return isDividendInfinite || isDivisorInfinite || (isNonZeroNumber && value % n === 0);
-};
-
-/**
- * is.int
- * Test if `value` is an integer.
- *
- * @param value to test
- * @return {Boolean} true if `value` is an integer, false otherwise
- * @api public
- */
-
-is.int = function (value) {
-  return is.number(value) && !isActualNaN(value) && value % 1 === 0;
-};
-
-/**
- * is.maximum
- * Test if `value` is greater than 'others' values.
- *
- * @param {Number} value value to test
- * @param {Array} others values to compare with
- * @return {Boolean} true if `value` is greater than `others` values
- * @api public
- */
-
-is.maximum = function (value, others) {
-  if (isActualNaN(value)) {
-    throw new TypeError('NaN is not a valid value');
-  } else if (!is.arraylike(others)) {
-    throw new TypeError('second argument must be array-like');
-  }
-  var len = others.length;
-
-  while (--len >= 0) {
-    if (value < others[len]) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
-/**
- * is.minimum
- * Test if `value` is less than `others` values.
- *
- * @param {Number} value value to test
- * @param {Array} others values to compare with
- * @return {Boolean} true if `value` is less than `others` values
- * @api public
- */
-
-is.minimum = function (value, others) {
-  if (isActualNaN(value)) {
-    throw new TypeError('NaN is not a valid value');
-  } else if (!is.arraylike(others)) {
-    throw new TypeError('second argument must be array-like');
-  }
-  var len = others.length;
-
-  while (--len >= 0) {
-    if (value > others[len]) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
-/**
- * is.nan
- * Test if `value` is not a number.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is not a number, false otherwise
- * @api public
- */
-
-is.nan = function (value) {
-  return !is.number(value) || value !== value;
-};
-
-/**
- * is.even
- * Test if `value` is an even number.
- *
- * @param {Number} value value to test
- * @return {Boolean} true if `value` is an even number, false otherwise
- * @api public
- */
-
-is.even = function (value) {
-  return is.infinite(value) || (is.number(value) && value === value && value % 2 === 0);
-};
-
-/**
- * is.odd
- * Test if `value` is an odd number.
- *
- * @param {Number} value value to test
- * @return {Boolean} true if `value` is an odd number, false otherwise
- * @api public
- */
-
-is.odd = function (value) {
-  return is.infinite(value) || (is.number(value) && value === value && value % 2 !== 0);
-};
-
-/**
- * is.ge
- * Test if `value` is greater than or equal to `other`.
- *
- * @param {Number} value value to test
- * @param {Number} other value to compare with
- * @return {Boolean}
- * @api public
- */
-
-is.ge = function (value, other) {
-  if (isActualNaN(value) || isActualNaN(other)) {
-    throw new TypeError('NaN is not a valid value');
-  }
-  return !is.infinite(value) && !is.infinite(other) && value >= other;
-};
-
-/**
- * is.gt
- * Test if `value` is greater than `other`.
- *
- * @param {Number} value value to test
- * @param {Number} other value to compare with
- * @return {Boolean}
- * @api public
- */
-
-is.gt = function (value, other) {
-  if (isActualNaN(value) || isActualNaN(other)) {
-    throw new TypeError('NaN is not a valid value');
-  }
-  return !is.infinite(value) && !is.infinite(other) && value > other;
-};
-
-/**
- * is.le
- * Test if `value` is less than or equal to `other`.
- *
- * @param {Number} value value to test
- * @param {Number} other value to compare with
- * @return {Boolean} if 'value' is less than or equal to 'other'
- * @api public
- */
-
-is.le = function (value, other) {
-  if (isActualNaN(value) || isActualNaN(other)) {
-    throw new TypeError('NaN is not a valid value');
-  }
-  return !is.infinite(value) && !is.infinite(other) && value <= other;
-};
-
-/**
- * is.lt
- * Test if `value` is less than `other`.
- *
- * @param {Number} value value to test
- * @param {Number} other value to compare with
- * @return {Boolean} if `value` is less than `other`
- * @api public
- */
-
-is.lt = function (value, other) {
-  if (isActualNaN(value) || isActualNaN(other)) {
-    throw new TypeError('NaN is not a valid value');
-  }
-  return !is.infinite(value) && !is.infinite(other) && value < other;
-};
-
-/**
- * is.within
- * Test if `value` is within `start` and `finish`.
- *
- * @param {Number} value value to test
- * @param {Number} start lower bound
- * @param {Number} finish upper bound
- * @return {Boolean} true if 'value' is is within 'start' and 'finish'
- * @api public
- */
-is.within = function (value, start, finish) {
-  if (isActualNaN(value) || isActualNaN(start) || isActualNaN(finish)) {
-    throw new TypeError('NaN is not a valid value');
-  } else if (!is.number(value) || !is.number(start) || !is.number(finish)) {
-    throw new TypeError('all arguments must be numbers');
-  }
-  var isAnyInfinite = is.infinite(value) || is.infinite(start) || is.infinite(finish);
-  return isAnyInfinite || (value >= start && value <= finish);
-};
-
-/**
- * Test object.
- */
-
-/**
- * is.object
- * Test if `value` is an object.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is an object, false otherwise
- * @api public
- */
-
-is.object = function (value) {
-  return value && '[object Object]' === toString.call(value);
-};
-
-/**
- * is.hash
- * Test if `value` is a hash - a plain object literal.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is a hash, false otherwise
- * @api public
- */
-
-is.hash = function (value) {
-  return is.object(value) && value.constructor === Object && !value.nodeType && !value.setInterval;
-};
-
-/**
- * Test regexp.
- */
-
-/**
- * is.regexp
- * Test if `value` is a regular expression.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if `value` is a regexp, false otherwise
- * @api public
- */
-
-is.regexp = function (value) {
-  return '[object RegExp]' === toString.call(value);
-};
-
-/**
- * Test string.
- */
-
-/**
- * is.string
- * Test if `value` is a string.
- *
- * @param {Mixed} value value to test
- * @return {Boolean} true if 'value' is a string, false otherwise
- * @api public
- */
-
-is.string = function (value) {
-  return '[object String]' === toString.call(value);
-};
-
-
-},{}],28:[function(require,module,exports){
-(function () {
-	"use strict";
-
-	// modified from https://github.com/kriskowal/es5-shim
-	var has = Object.prototype.hasOwnProperty,
-		is = require('is'),
-		forEach = require('foreach'),
-		hasDontEnumBug = !({'toString': null}).propertyIsEnumerable('toString'),
-		dontEnums = [
-			"toString",
-			"toLocaleString",
-			"valueOf",
-			"hasOwnProperty",
-			"isPrototypeOf",
-			"propertyIsEnumerable",
-			"constructor"
-		],
-		keysShim;
-
-	keysShim = function keys(object) {
-		if (!is.object(object) && !is.array(object)) {
-			throw new TypeError("Object.keys called on a non-object");
-		}
-
-		var name, theKeys = [];
-		for (name in object) {
-			if (has.call(object, name)) {
-				theKeys.push(name);
-			}
-		}
-
-		if (hasDontEnumBug) {
-			forEach(dontEnums, function (dontEnum) {
-				if (has.call(object, dontEnum)) {
-					theKeys.push(dontEnum);
-				}
-			});
-		}
-		return theKeys;
-	};
-
-	module.exports = keysShim;
-}());
-
-
-},{"foreach":26,"is":27}],29:[function(require,module,exports){
-var EventEmitter = require('events').EventEmitter
-var inherits     = require('util').inherits
-var ranges       = require('string-range')
-var fixRange     = require('level-fix-range')
-var xtend        = require('xtend')
-
-inherits(SubDB, EventEmitter)
-
-function SubDB (db, prefix, options) {
-  if('string' === typeof options) {
-    console.error('db.sublevel(name, seperator<string>) is depreciated')
-    console.error('use db.sublevel(name, {sep: separator})) if you must')
-    options = {sep: options}
-  }
-  if(!(this instanceof SubDB)) return new SubDB(db, prefix, options)
-  if(!db)     throw new Error('must provide db')
-  if(!prefix) throw new Error('must provide prefix')
-
-  options = options || {}
-  options.sep = options.sep || '\xff'
-  
-  this._parent = db
-  this._options = options
-  this.options = options
-  this._prefix = prefix
-  this._root = root(this)
-  db.sublevels[prefix] = this
-  this.sublevels = {}
-  this.methods = {}
-  var self = this
-  this.hooks = {
-    pre: function () {
-      return self.pre.apply(self, arguments)
-    },
-    post: function () {
-      return self.post.apply(self, arguments)
-    }
-  }
-}
-
-var SDB = SubDB.prototype
-
-SDB._key = function (key) {
-  var sep = this._options.sep
-  return sep
-    + this._prefix 
-    + sep
-    + key
-}
-
-SDB._getOptsAndCb = function (opts, cb) {
-  if (typeof opts == 'function') { 
-    cb = opts
-    opts = {}
-  }
-  return { opts: xtend(opts, this._options), cb: cb }
-}
-
-SDB.sublevel = function (prefix, options) {
-  if(this.sublevels[prefix])
-    return this.sublevels[prefix]
-  return new SubDB(this, prefix, options || this._options)
-}
-
-SDB.put = function (key, value, opts, cb) {
-  var res = this._getOptsAndCb(opts, cb)
-  this._root.put(this.prefix(key), value, res.opts, res.cb)
-}
-
-SDB.get = function (key, opts, cb) {
-  var res = this._getOptsAndCb(opts, cb)
-  this._root.get(this.prefix(key), res.opts, res.cb)
-}
-
-SDB.del = function (key, opts, cb) {
-  var res = this._getOptsAndCb(opts, cb)
-  this._root.del(this.prefix(key), res.opts, res.cb)
-}
-
-SDB.batch = function (changes, opts, cb) {
-  if(!Array.isArray(changes))
-    throw new Error('batch must be passed an Array')
-  var self = this
-  changes.forEach(function (ch) {
-
-    //OH YEAH, WE NEED TO VALIDATE THAT UPDATING THIS KEY/PREFIX IS ALLOWED
-    if('string' === typeof ch.prefix)
-      ch.key = ch.prefix + ch.key
-    else
-      ch.key = (ch.prefix || self).prefix(ch.key)
-
-    if(ch.prefix) ch.prefix = null
-  })
-  this._root.batch(changes, opts, cb)
-}
-
-SDB.prefix = function (key) {
-  var sep = this._options.sep
-  return this._parent.prefix() + sep + this._prefix + sep + (key || '')
-}
-
-SDB.keyStream =
-SDB.createKeyStream = function (opts) {
-  opts = opts || {}
-  opts.keys = true
-  opts.values = false
-  return this.createReadStream(opts)
-}
-
-SDB.valueStream =
-SDB.createValueStream = function (opts) {
-  opts = opts || {}
-  opts.keys = false
-  opts.values = true
-  opts.keys = false
-  return this.createReadStream(opts)
-}
-
-function selectivelyMerge(_opts, opts) {
-  [ 'valueEncoding'
-  , 'encoding'
-  , 'keyEncoding'
-  , 'reverse'
-  , 'values'
-  , 'keys'
-  , 'limit'
-  , 'fillCache'
-  ]
-  .forEach(function (k) {
-    if (opts.hasOwnProperty(k)) _opts[k] = opts[k]        
-  })
-}
-
-SDB.readStream = 
-SDB.createReadStream = function (opts) {
-  opts = opts || {}
-  var r = root(this)
-  var p = this.prefix()
-
-  var _opts = ranges.prefix(opts, p)
-  selectivelyMerge(_opts, xtend(opts, this._options))
-
-  var s = r.createReadStream(_opts)
-
-  if(_opts.values === false) {
-    var emit = s.emit
-    s.emit = function (event, val) {
-      if(event === 'data') {
-        emit.call(this, 'data', val.substring(p.length))
-      } else
-        emit.call(this, event, val)
-    }
-    return s
-  } else if(_opts.keys === false)
-    return s
-  else
-    return s.on('data', function (d) {
-      //mutate the prefix!
-      //this doesn't work for createKeyStream admittedly.
-      d.key = d.key.substring(p.length)
-    })
-}
-
-
-SDB.writeStream =
-SDB.createWriteStream = function () {
-  var r = root(this)
-  var p = this.prefix()
-  var ws = r.createWriteStream.apply(r, arguments)
-  var write = ws.write
-
-  var encoding = this._options.encoding
-  var valueEncoding = this._options.valueEncoding
-  var keyEncoding = this._options.keyEncoding
-
-  // slight optimization, if no encoding was specified at all,
-  // which will be the case most times, make write not check at all
-  var nocheck = !encoding && !valueEncoding && !keyEncoding
-
-  ws.write = nocheck 
-    ? function (data) {
-        data.key = p + data.key
-        return write.call(ws, data)
-      }
-    : function (data) {
-        data.key = p + data.key
-        
-        // not merging all options here since this happens on every write and things could get slowed down
-        // at this point we only consider encoding important to propagate
-        if (encoding && typeof data.encoding === 'undefined') data.encoding = encoding
-        if (valueEncoding && typeof data.valueEncoding === 'undefined') data.valueEncoding = valueEncoding
-        if (keyEncoding && typeof data.keyEncoding === 'undefined') data.keyEncoding = keyEncoding
-
-        return write.call(ws, data)
-      }
-  return ws
-}
-
-SDB.approximateSize = function () {
-  var r = root(db)
-  return r.approximateSize.apply(r, arguments)
-}
-
-function root(db) {
-  if(!db._parent) return db
-  return root(db._parent)
-}
-
-SDB.pre = function (range, hook) {
-  if(!hook) hook = range, range = null
-  range = ranges.prefix(range, this.prefix(), this._options.sep)
-  var r = root(this._parent)
-  var p = this.prefix()
-  return r.hooks.pre(fixRange(range), function (ch, add) {
-    hook({
-      key: ch.key.substring(p.length),
-      value: ch.value,
-      type: ch.type
-    }, function (ch, _p) {
-      //maybe remove the second add arg now
-      //that op can have prefix?
-      add(ch, ch.prefix ? _p : (_p || p))
-    })
-  })
-}
-
-SDB.post = function (range, hook) {
-  if(!hook) hook = range, range = null
-  var r = root(this._parent)
-  var p = this.prefix()
-  range = ranges.prefix(range, p, this._options.sep)
-  return r.hooks.post(fixRange(range), function (data) {
-    hook({key: data.key.substring(p.length), value: data.value, type: data.type})
-  })
-}
-
-var exports = module.exports = SubDB
-
-
-},{"events":3,"level-fix-range":20,"string-range":22,"util":5,"xtend":24}],30:[function(require,module,exports){
 var mcRegion = require('minecraft-region')
 var mca = require('minecraft-mca')
 var stream = require('stream')
@@ -9192,7 +6284,7 @@ MCA2JSON.prototype.convert = function(buf, regionX, regionZ) {
   self.emit('end')
 }
 
-},{"minecraft-mca":31,"minecraft-region":33,"stream":4,"util":5}],31:[function(require,module,exports){
+},{"minecraft-mca":13,"minecraft-region":16,"stream":4,"util":5}],13:[function(require,module,exports){
 var mcChunk = require('minecraft-chunk')
 
 module.exports = RegionRenderer
@@ -9278,7 +6370,7 @@ RegionRenderer.prototype.loadChunk = function(chunkX, chunkZ) {
     return false
   }
 }
-},{"minecraft-chunk":32}],32:[function(require,module,exports){
+},{"minecraft-chunk":14}],14:[function(require,module,exports){
 var blockInfo = require('minecraft-blockinfo')
 
 // Generated by CoffeeScript 1.6.2
@@ -9538,7 +6630,1121 @@ module.exports.calcPoint = calcPoint;
 module.exports.typeToCoords = typeToCoords;
 
 
-},{"minecraft-blockinfo":39}],33:[function(require,module,exports){
+},{"minecraft-blockinfo":15}],15:[function(require,module,exports){
+// mostly from http://www.minecraftwiki.net/wiki/Data_values#Data
+
+// TODO (fork and contribute!): water, lava, fire, saplings, wood rotation, decay of leaves, slab orientation, piston, piston extension, redstone wire, crops, sign posts, farmland, door, rails, levers, pressure plates, buttons, snowfall, cacti, sugar cane, jukebox, pumpkins, cake, redstone repeaters, trapdoors, monster egg, stone brick, mushrooms, stems, vines, fence gates, nether wart, brewing stand, cauldron, end portal block, cocoas, tripwire hook, tripwire, flower pots, heads, dyes, anvil, potions, status effects, spawn eggs, golden apple
+
+module.exports.colored_wool = {
+  "0":   {"color": "ffffff", "name": "White"},
+  "1":   {"color": "ffa800", "name": "Orange"},
+  "2":   {"color": "ea01ff", "name": "Magenta"},
+  "3":   {"color": "b1eeff", "name": "Light Blue"},
+  "4":   {"color": "fdfa00", "name": "Yellow"},
+  "5":   {"color": "54ff00", "name": "Lime"},
+  "6":   {"color": "ff00ea", "name": "Pink"},
+  "7":   {"color": "b8b8b8", "name": "Gray"},
+  "8":   {"color": "ebebeb", "name": "Light Gray"},
+  "9":   {"color": "2efff8", "name": "Cyan"},
+  "10":  {"color": "9e0ec7", "name": "Purple"},
+  "11":  {"color": "1334ff", "name": "Blue"},
+  "12":  {"color": "896862", "name": "Brown"},
+  "13":  {"color": "0c840f", "name": "Green"},
+  "14":  {"color": "f00000", "name": "Red"},
+  "15":  {"color": "000000", "name": "Black"}
+}
+
+// alternative wool colors
+// • White      - FFe4e4e4 
+// • Light Gray - FFa0a7a7 
+// • Dark Gray  - FF414141 
+// • Black      - FF181414 
+// • Red        - FF9e2b27 
+// • Orange     - FFea7e35 
+// • Yellow     - FFc2b51c 
+// • Lime Green - FF39ba2e 
+// • Green      - FF364b18 
+// • Light Blue - FF6387d2 
+// • Cyan       - FF267191 
+// • Blue       - FF253193 
+// • Purple     - FF7e34bf 
+// • Magenta    - FFbe49c9 
+// • Pink       - FFd98199 
+// • Brown      - FF56331c
+
+module.exports.wooden_plank = {
+  "0": "oak_wood_planks",
+  "1": "spruce_wood_planks",
+  "2": "birch_wood_planks",
+  "3": "jungle_wood_planks"
+}
+
+module.exports.wood = {
+  "0": "oak_wood",
+  "1": "spruce_wood",
+  "2": "birch_wood",
+  "3": "jungle_wood"
+}
+
+module.exports.leaves = {
+  "0": "oak_leaves",
+  "1": "spruce_leaves",
+  "2": "birch_leaves",
+  "3": "jungle_leaves"
+}
+
+module.exports.torches = {
+  "1": "east",
+  "2": "west",
+  "3": "south",
+  "4": "north",
+  "5": "floor",
+  "6": "ground" // not sure what the diff is between the last two
+}
+
+module.exports.slabs = {
+  "0": "stone_slab",
+  "1": "sandstone_slab",
+  "2": "wooden_slab",
+  "3": "cobblestone_slab",
+  "4": "brick_slab",
+  "5": "stone_brick_slab",
+  "6": "nether_brick_slab",
+  "7": "quartz_slab",
+  // double slabs only:
+  "8": "smooth_stone_slab",
+  "9": "smooth_sandstone_slab",
+  "15": "tile_quartz_slab" // note the underside
+}
+
+module.exports.wooden_slab = {
+  "0": "oak_wood_slab", 
+  "1": "spruce_wood_slab",
+  "2": "birch_wood_slab",
+  "3": "jungle_wood_slab"
+}
+
+module.exports.sandstone = {
+  "0": "normal",
+  "1": "chiseled",
+  "2": "smooth"
+}
+
+module.exports.bed = {
+  "0": "Head is pointing south",
+  "1": "Head is pointing west",
+  "2": "Head is pointing north",
+  "3": "Head is pointing east"
+}
+
+module.exports.grass = {
+  "0": "shrub", // (identical in appearance to block Dead Bush when placed, but acts like grass or fern)
+  "1": "grass",
+  "2": "fern",
+}
+
+// ascending direction
+module.exports.stairs = {
+  "0": "east",
+  "1": "west",
+  "2": "south",
+  "3": "north"
+}
+
+// facing direction
+module.exports.attachments = {
+  "0": "down",
+  "1": "up",
+  "2": "north",
+  "3": "south",
+  "4": "west",
+  "5": "east"
+}
+
+module.exports.cobblestone_wall = {
+  "0": "cobblestone",
+  "1": "moss_stone"
+}
+
+module.exports.quartz = {
+  "0": "quartz_block",
+  "1": "chiseled_quartz_block",
+  "2": "pillar_quartz_block_vertical",
+  "3": "pillar_quartz_block_north_south",
+  "4": "pillar_quartz_block_east_west"
+}
+
+module.exports.coal = {
+  "0": "coal",
+  "1": "charcoal"
+}
+
+module.exports.blocks = {
+  "_-1": {
+    id: -10,
+    type: "fill"
+  },
+  "_1": {
+    "type": "stone",
+    "id": 1
+  },
+  "_2": {
+    "type": "grass",
+    "id": 2
+  },
+  "_3": {
+    "type": "dirt",
+    "id": 3
+  },
+  "_4": {
+    "type": "cobblestone",
+    "id": 4
+  },
+  "_5": {
+    "type": "wooden_plank",
+    "id": 5,
+    "data": module.exports.wooden_plank
+  },
+  "_6": {
+    "type": "sapling",
+    "id": 6
+  },
+  "_7": {
+    "type": "adminium",
+    "id": 7
+  },
+  "_8": {
+    "type": "water",
+    "id": 8
+  },
+  "_9": {
+    "type": "stationary_water",
+    "id": 9
+  },
+  "_10": {
+    "type": "lava",
+    "id": 10
+  },
+  "_11": {
+    "type": "stationary_lava",
+    "id": 11
+  },
+  "_12": {
+    "type": "sand",
+    "id": 12
+  },
+  "_13": {
+    "type": "gravel",
+    "id": 13
+  },
+  "_14": {
+    "type": "gold_ore",
+    "id": 14
+  },
+  "_15": {
+    "type": "iron_ore",
+    "id": 15
+  },
+  "_16": {
+    "type": "coal_ore",
+    "id": 16
+  },
+  "_17": {
+    "type": "wood",
+    "id": 17,
+    "data": module.exports.wood
+  },
+  "_18": {
+    "type": "leaves",
+    "id": 18,
+    "data": module.exports.leaves
+  },
+  "_19": {
+    "type": "sponge",
+    "id": 19
+  },
+  "_20": {
+    "type": "glass",
+    "id": 20
+  },
+  "_21": {
+    "type": "lapis_lazuli_ore",
+    "id": 21
+  },
+  "_22": {
+    "type": "lapis_lazuli_block",
+    "id": 22
+  },
+  "_23": {
+    "type": "dispenser",
+    "id": 23,
+    "data": module.exports.attachments
+  },
+  "_24": {
+    "type": "sandstone",
+    "id": 24,
+    "data": module.exports.sandstone
+  },
+  "_25": {
+    "type": "note_block",
+    "id": 25
+  },
+  "_26": {
+    "type": "colored_wool",
+    "id": 26,
+    "data": module.exports.colored_wool
+  },
+  "_27": {
+    "type": "powered_rail",
+    "id": 27
+  },
+  "_28": {
+    "type": "detector_rail",
+    "id": 28
+  },
+  "_29": {
+    "type": "sticky_piston",
+    "id": 29
+  },
+  "_30": {
+    "type": "cobweb",
+    "id": 30
+  },
+  "_31": {
+    "type": "grass",
+    "id": 31,
+    "data": module.exports.grass
+  },
+  "_32": {
+    "type": "dead_bush",
+    "id": 32
+  },
+  "_33": {
+    "type": "piston",
+    "id": 33
+  },
+  "_34": {
+    "type": "black_wool",
+    "id": 34
+  },
+  "_35": {
+    "type": "wool",
+    "id": 35
+  },
+  "_36": {
+    "type": "wool",
+    "id": 36
+  },
+  "_37": {
+    "type": "yellow_flower",
+    "id": 37
+  },
+  "_38": {
+    "type": "red_flower",
+    "id": 38
+  },
+  "_39": {
+    "type": "brown_mushroom",
+    "id": 39
+  },
+  "_40": {
+    "type": "red_mushroom",
+    "id": 40
+  },
+  "_41": {
+    "type": "gold_block",
+    "id": 41
+  },
+  "_42": {
+    "type": "iron_block",
+    "id": 42
+  },
+  "_43": {
+    "type": "double_slabs",
+    "id": 43,
+    "data": module.exports.slabs
+  },
+  "_44": {
+    "type": "slabs",
+    "id": 44,
+    "data": module.exports.slabs
+  },
+  "_45": {
+    "type": "brick",
+    "id": 45
+  },
+  "_46": {
+    "type": "tnt",
+    "id": 46
+  },
+  "_47": {
+    "type": "bookshelf",
+    "id": 47
+  },
+  "_48": {
+    "type": "moss_stone",
+    "id": 48
+  },
+  "_49": {
+    "type": "obsidian",
+    "id": 49
+  },
+  "_50": {
+    "type": "torch",
+    "id": 50,
+    "data": module.exports.torches
+  },
+  "_51": {
+    "type": "fire",
+    "id": 51
+  },
+  "_52": {
+    "type": "monster_spawner",
+    "id": 52
+  },
+  "_53": {
+    "type": "wooden_stairs",
+    "id": 53,
+    "data": module.exports.stairs
+  },
+  "_54": {
+    "type": "chest",
+    "id": 54,
+    "data": module.exports.attachments
+  },
+  "_55": {
+    "type": "redstone_wire",
+    "id": 55
+  },
+  "_56": {
+    "type": "diamond_ore",
+    "id": 56
+  },
+  "_57": {
+    "type": "diamond_block",
+    "id": 57
+  },
+  "_58": {
+    "type": "workbench",
+    "id": 58
+  },
+  "_59": {
+    "type": "wheat_seeds",
+    "id": 59
+  },
+  "_60": {
+    "type": "soil",
+    "id": 60
+  },
+  "_61": {
+    "type": "furnace",
+    "id": 61,
+    "data": module.exports.attachments
+  },
+  "_62": {
+    "type": "burning_furnace",
+    "id": 62
+  },
+  "_63": {
+    "type": "signpost",
+    "id": 63
+  },
+  "_64": {
+    "type": "wooden_door",
+    "id": 64
+  },
+  "_65": {
+    "type": "ladder",
+    "id": 65,
+    "data": module.exports.attachments
+  },
+  "_66": {
+    "type": "minecart_track",
+    "id": 66
+  },
+  "_67": {
+    "type": "cobblestone_stairs",
+    "id": 67,
+    "data": module.exports.stairs
+  },
+  "_68": {
+    "type": "wall_sign",
+    "id": 68,
+    "data": module.exports.attachments
+  },
+  "_69": {
+    "type": "lever",
+    "id": 69
+  },
+  "_70": {
+    "type": "stone_pressure_plate",
+    "id": 70
+  },
+  "_71": {
+    "type": "iron_door",
+    "id": 71
+  },
+  "_72": {
+    "type": "wooden_pressure_plate",
+    "id": 72
+  },
+  "_73": {
+    "type": "redstone_ore",
+    "id": 73
+  },
+  "_74": {
+    "type": "glowing_redstone_ore",
+    "id": 74
+  },
+  "_75": {
+    "type": "redstone_torch_off",
+    "id": 75,
+    "data": module.exports.torches
+  },
+  "_76": {
+    "type": "redstone_torch_on",
+    "id": 76,
+    "data": module.exports.torches
+  },
+  "_77": {
+    "type": "stone_button",
+    "id": 77
+  },
+  "_78": {
+    "type": "snow",
+    "id": 78
+  },
+  "_79": {
+    "type": "ice",
+    "id": 79
+  },
+  "_80": {
+    "type": "snow_block",
+    "id": 80
+  },
+  "_81": {
+    "type": "cactus",
+    "id": 81
+  },
+  "_82": {
+    "type": "clay",
+    "id": 82
+  },
+  "_83": {
+    "type": "sugar_cane",
+    "id": 83
+  },
+  "_84": {
+    "type": "jukebox",
+    "id": 84
+  },
+  "_85": {
+    "type": "fence",
+    "id": 85
+  },
+  "_86": {
+    "type": "pumpkin",
+    "id": 86
+  },
+  "_87": {
+    "type": "netherrack",
+    "id": 87
+  },
+  "_88": {
+    "type": "soul_sand",
+    "id": 88
+  },
+  "_89": {
+    "type": "glowstone",
+    "id": 89
+  },
+  "_90": {
+    "type": "portal",
+    "id": 90
+  },
+  "_91": {
+    "type": "jack-o-lantern",
+    "id": 91
+  },
+  "_92": {
+    "type": "cake",
+    "id": 92
+  },
+  "_95": {
+    "type": "locked_chest",
+    "id": 95,
+    "data": module.exports.attachments
+  },
+  "_96": {
+    "type": "trapdoor",
+    "id": 96
+  },
+  "_97": {
+    "type": "monster_egg",
+    "id": 97
+  },
+  "_98": {
+    "type": "stone_brick",
+    "id": 98
+  },
+  "_99": {
+    "type": "huge_brown_mushroom",
+    "id": 99
+  },
+  "_100": {
+    "type": "huge_red_mushroom",
+    "id": 100
+  },
+  "_101": {
+    "type": "iron_bars",
+    "id": 101
+  },
+  "_102": {
+    "type": "glass_pane",
+    "id": 102
+  },
+  "_103": {
+    "type": "melon",
+    "id": 103
+  },
+  "_106": {
+    "type": "vines",
+    "id": 106
+  },
+  "_107": {
+    "type": "fence_gate",
+    "id": 107
+  },
+  "_108": {
+    "type": "brick_stairs",
+    "id": 108,
+    "data": module.exports.stairs
+  },
+  "_109": {
+    "type": "stone_brick_stairs",
+    "id": 109,
+    "data": module.exports.stairs
+  },
+  "_110": {
+    "type": "mycelium",
+    "id": 110
+  },
+  "_111": {
+    "type": "lily_pad",
+    "id": 111
+  },
+  "_112": {
+    "type": "nether_brick",
+    "id": 112
+  },
+  "_113": {
+    "type": "nether_brick_fence",
+    "id": 113
+  },
+  "_114": {
+    "type": "nether_brick_stairs",
+    "id": 114,
+    "data": module.exports.stairs
+  },
+  "_116": {
+    "type": "enchantment_table",
+    "id": 116
+  },
+  "_121": {
+    "type": "end_stone",
+    "id": 121
+  },
+  "_122": {
+    "type": "dragon_egg",
+    "id": 122
+  },
+  "_123": {
+    "type": "redstone_lamp",
+    "id": 123
+  },
+  "_126": {
+    "type": "wooden_slab",
+    "id": 126,
+    "data": module.exports.wooden_slab
+  },
+  "_127": {
+    "type": "cocoa_plant",
+    "id": 127
+  },
+  "_128": {
+    "type": "sandstone_stairs",
+    "id": 128,
+    "data": module.exports.stairs
+  },
+  "_129": {
+    "type": "emerald_ore",
+    "id": 129
+  },
+  "_130": {
+    "type": "ender_chest",
+    "id": 130,
+    "data": module.exports.attachments
+  },
+  "_133": {
+    "type": "block_of_emerald",
+    "id": 133
+  },
+  "_134": {
+    "type": "spruce_wood_stairs",
+    "id": 134,
+    "data": module.exports.stairs
+  },
+  "_135": {
+    "type": "birch_wood_stairs",
+    "id": 135,
+    "data": module.exports.stairs
+  },
+  "_136": {
+    "type": "jungle_wood_stairs",
+    "id": 136,
+    "data": module.exports.stairs
+  },
+  "_137": {
+    "type": "command_block",
+    "id": 137
+  },
+  "_138": {
+    "type": "beacon",
+    "id": 138
+  },
+  "_139": {
+    "type": "cobblestone_wall",
+    "id": 139,
+    "data": module.exports.cobblestone_wall
+  },
+  "_143": {
+    "type": "wooden_button",
+    "id": 143
+  },
+  "_145": {
+    "type": "anvil",
+    "id": 145
+  },
+  "_146" : {
+    "id": 146, 
+    "type": "trapped_chest",
+    "data": module.exports.attachments
+  },
+  "_147": {
+    "id": 147, 
+    "type": "weighted_pressure_plate_light"
+  },
+  "_148": {
+    "id": 148, 
+    "type": "weighted_pressure_plate_heavy"
+  },
+  "_149": {
+    "id": 149, 
+    "type": "redstone_comparator_inactive"
+  },
+  "_150": {
+    "id": 150, 
+    "type": "redstone_comparator_active"
+  },
+  "_151": {
+    "id": 151, 
+    "type": "daylight_sensor"
+  },
+  "_152": {
+    "id": 152, 
+    "type": "redstone_block"
+  },
+  "_153": {
+    "id": 153,
+    "type": "nether_quartz_ore"
+  },
+  "_154": {
+    "id": 154, 
+    "type": "hopper",
+    "data": module.exports.attachments
+  },
+  "_155": {
+    "id": 155, 
+    "type": "quartz_block"
+  },
+  "_156": {
+    "id": 156, 
+    "type": "quartz_stairs",
+    "data": module.exports.stairs
+  },
+  "_157": {
+    "id": 157, 
+    "type": "activator_rail"
+  },
+  "_158": {
+    "id": 158, 
+    "type": "dropper",
+    "data": module.exports.attachments
+  },
+  "_170": {
+    "id": 170, 
+    "type": "hay_bale"
+  },
+  "_171": {
+    "id": 171, 
+    "type": "carpet"
+  },
+  "_260": {
+    "type": "apple",
+    "id": 260
+  },
+  "_262": {
+    "type": "arrow",
+    "id": 262
+  },
+  "_263": {
+    "type": "coal",
+    "id": 263,
+    "data": module.exports.coal
+  },
+  "_264": {
+    "type": "diamond",
+    "id": 264
+  },
+  "_265": {
+    "type": "iron_ingot",
+    "id": 265
+  },
+  "_266": {
+    "type": "gold_ingot",
+    "id": 266
+  },
+  "_280": {
+    "type": "stick",
+    "id": 280
+  },
+  "_281": {
+    "type": "bowl",
+    "id": 281
+  },
+  "_282": {
+    "type": "mushroom_soup",
+    "id": 282
+  },
+  "_287": {
+    "type": "string",
+    "id": 287
+  },
+  "_288": {
+    "type": "feather",
+    "id": 288
+  },
+  "_289": {
+    "type": "gun_powder",
+    "id": 289
+  },
+  "_295": {
+    "type": "seeds",
+    "id": 295
+  },
+  "_296": {
+    "type": "wheat",
+    "id": 296
+  },
+  "_297": {
+    "type": "bread",
+    "id": 297
+  },
+  "_318": {
+    "type": "flint",
+    "id": 318
+  },
+  "_319": {
+    "type": "raw_porkchop",
+    "id": 319
+  },
+  "_320": {
+    "type": "cooked_porkchop",
+    "id": 320
+  },
+  "_321": {
+    "type": "paintings",
+    "id": 321
+  },
+  "_322": {
+    "type": "golden_apple",
+    "id": 322
+  },
+  "_323": {
+    "type": "sign",
+    "id": 323
+  },
+  "_324": {
+    "type": "wooden_door",
+    "id": 324
+  },
+  "_325": {
+    "type": "bucket",
+    "id": 325
+  },
+  "_326": {
+    "type": "water_bucket",
+    "id": 326
+  },
+  "_327": {
+    "type": "lava_bucket",
+    "id": 327
+  },
+  "_329": {
+    "type": "saddle",
+    "id": 329
+  },
+  "_330": {
+    "type": "iron_door",
+    "id": 330
+  },
+  "_331": {
+    "type": "redstone_dust",
+    "id": 331
+  },
+  "_332": {
+    "type": "snowball",
+    "id": 332
+  },
+  "_333": {
+    "type": "boat",
+    "id": 333
+  },
+  "_334": {
+    "type": "leather",
+    "id": 334
+  },
+  "_335": {
+    "type": "milk",
+    "id": 335
+  },
+  "_336": {
+    "type": "clay_brick",
+    "id": 336
+  },
+  "_337": {
+    "type": "clay_balls",
+    "id": 337
+  },
+  "_338": {
+    "type": "sugar_cane",
+    "id": 338
+  },
+  "_339": {
+    "type": "paper",
+    "id": 339
+  },
+  "_340": {
+    "type": "book",
+    "id": 340
+  },
+  "_341": {
+    "type": "slimeball",
+    "id": 341
+  },
+  "_344": {
+    "type": "egg",
+    "id": 344
+  },
+  "_346": {
+    "type": "fishing_rod",
+    "id": 346
+  },
+  "_348": {
+    "type": "glowstone_dust",
+    "id": 348
+  },
+  "_349": {
+    "type": "raw_fish",
+    "id": 349
+  },
+  "_350": {
+    "type": "cooked_fish",
+    "id": 350
+  },
+  "_351": {
+    "type": "dyes",
+    "id": 351
+  },
+  "_352": {
+    "type": "bone",
+    "id": 352
+  },
+  "_353": {
+    "type": "sugar",
+    "id": 353
+  },
+  "_354": {
+    "type": "cake",
+    "id": 354
+  },
+  "_354": {
+    "type": "bed",
+    "id": 355,
+    "data": module.exports.bed
+  },
+  "_356": {
+    "type": "redstone_repeater",
+    "id": 356
+  },
+  "_357": {
+    "type": "cookie",
+    "id": 357
+  },
+  "_358": {
+    "type": "map",
+    "id": 358
+  },
+  "_359": {
+    "type": "shears",
+    "id": 359
+  },
+  "_360": {
+    "type": "melon_slice",
+    "id": 360
+  },
+  "_361": {
+    "type": "pumpkin_seeds",
+    "id": 361
+  },
+  "_362": {
+    "type": "melon_seeds",
+    "id": 362
+  },
+  "_363": {
+    "type": "raw_beef",
+    "id": 363
+  },
+  "_364": {
+    "type": "steak",
+    "id": 364
+  },
+  "_365": {
+    "type": "raw_chicken",
+    "id": 365
+  },
+  "_366": {
+    "type": "cooked_chicken",
+    "id": 366
+  },
+  "_367": {
+    "type": "rotton_flesh",
+    "id": 367
+  },
+  "_368": {
+    "type": "ender_pearl",
+    "id": 368
+  },
+  "_369": {
+    "type": "blaze_rod",
+    "id": 369
+  },
+  "_370": {
+    "type": "ghast_tear",
+    "id": 370
+  },
+  "_374": {
+    "type": "glass_bottle",
+    "id": 374
+  },
+  "_375": {
+    "type": "spider_eye",
+    "id": 375
+  },
+  "_376": {
+    "type": "fermented_spider_eye",
+    "id": 376
+  },
+  "_377": {
+    "type": "blaze_powder",
+    "id": 377
+  },
+  "_378": {
+    "type": "magma_cream",
+    "id": 378
+  },
+  "_379": {
+    "type": "brewing_stand",
+    "id": 379
+  },
+  "_380": {
+    "type": "cauldron",
+    "id": 380
+  },
+  "_381": {
+    "type": "eye_of_ender",
+    "id": 381
+  },
+  "_382": {
+    "type": "glistering_melon",
+    "id": 382
+  },
+  "_383": {
+    "type": "spawn_eggs",
+    "id": 383
+  },
+  "_384": {
+    "type": "bottle_o_enchanting",
+    "id": 384
+  },
+  "_385": {
+    "type": "fire_charge",
+    "id": 385
+  },
+  "_388": {
+    "type": "emerald",
+    "id": 388
+  },
+  "_390": {
+    "type": "flower_pot",
+    "id": 390
+  },
+  "_391": {
+    "type": "carrot",
+    "id": 391
+  },
+  "_392": {
+    "type": "unknown",
+    "id": 392
+  },
+  "_393": {
+    "type": "baked_potato",
+    "id": 393
+  },
+  "_394": {
+    "type": "poisonous_potato",
+    "id": 394
+  },
+  "_395": {
+    "type": "map",
+    "id": 395
+  },
+  "_396": {
+    "type": "golden_carrot",
+    "id": 396
+  },
+  "_397": {
+    "type": "mob_head",
+    "id": 397
+  },
+  "_399": {
+    "type": "nether_star",
+    "id": 399
+  },
+  "_400": {
+    "type": "pumkpin_pie",
+    "id": 400
+  },
+  "_401": {
+    "type": "firework_rocket",
+    "id": 401
+  },
+  "_402": {
+    "type": "firework_star",
+    "id": 402
+  }
+}
+},{}],16:[function(require,module,exports){
 (function(process){var dataview = require('jDataView');
 var NBTReader = require('minecraft-nbt').NBTReader;
 var chunk = require('minecraft-chunk');
@@ -9651,7 +7857,7 @@ module.exports = function(data, x, z) {
 }
 
 })(require("__browserify_process"))
-},{"./zlib-inflate.min":37,"./zlibjs-node":38,"__browserify_process":11,"jDataView":34,"minecraft-chunk":35,"minecraft-nbt":36}],34:[function(require,module,exports){
+},{"./zlib-inflate.min":21,"./zlibjs-node":22,"__browserify_process":11,"jDataView":17,"minecraft-chunk":18,"minecraft-nbt":20}],17:[function(require,module,exports){
 (function(Buffer){//
 // jDataView by Vjeux - Jan 2010
 //
@@ -10150,7 +8356,7 @@ if (typeof module !== 'undefined') {
 })(this);
 
 })(require("__browserify_Buffer").Buffer)
-},{"__browserify_Buffer":10}],35:[function(require,module,exports){
+},{"__browserify_Buffer":10}],18:[function(require,module,exports){
 var blockInfo = require('minecraft-blockinfo')
 
 // Generated by CoffeeScript 1.6.2
@@ -10410,7 +8616,1121 @@ module.exports.calcPoint = calcPoint;
 module.exports.typeToCoords = typeToCoords;
 
 
-},{"minecraft-blockinfo":39}],36:[function(require,module,exports){
+},{"minecraft-blockinfo":19}],19:[function(require,module,exports){
+// mostly from http://www.minecraftwiki.net/wiki/Data_values#Data
+
+// TODO (fork and contribute!): water, lava, fire, saplings, wood rotation, decay of leaves, slab orientation, piston, piston extension, redstone wire, crops, sign posts, farmland, door, rails, levers, pressure plates, buttons, snowfall, cacti, sugar cane, jukebox, pumpkins, cake, redstone repeaters, trapdoors, monster egg, stone brick, mushrooms, stems, vines, fence gates, nether wart, brewing stand, cauldron, end portal block, cocoas, tripwire hook, tripwire, flower pots, heads, dyes, anvil, potions, status effects, spawn eggs, golden apple
+
+module.exports.colored_wool = {
+  "0":   {"color": "ffffff", "name": "White"},
+  "1":   {"color": "ffa800", "name": "Orange"},
+  "2":   {"color": "ea01ff", "name": "Magenta"},
+  "3":   {"color": "b1eeff", "name": "Light Blue"},
+  "4":   {"color": "fdfa00", "name": "Yellow"},
+  "5":   {"color": "54ff00", "name": "Lime"},
+  "6":   {"color": "ff00ea", "name": "Pink"},
+  "7":   {"color": "b8b8b8", "name": "Gray"},
+  "8":   {"color": "ebebeb", "name": "Light Gray"},
+  "9":   {"color": "2efff8", "name": "Cyan"},
+  "10":  {"color": "9e0ec7", "name": "Purple"},
+  "11":  {"color": "1334ff", "name": "Blue"},
+  "12":  {"color": "896862", "name": "Brown"},
+  "13":  {"color": "0c840f", "name": "Green"},
+  "14":  {"color": "f00000", "name": "Red"},
+  "15":  {"color": "000000", "name": "Black"}
+}
+
+// alternative wool colors
+// • White      - FFe4e4e4 
+// • Light Gray - FFa0a7a7 
+// • Dark Gray  - FF414141 
+// • Black      - FF181414 
+// • Red        - FF9e2b27 
+// • Orange     - FFea7e35 
+// • Yellow     - FFc2b51c 
+// • Lime Green - FF39ba2e 
+// • Green      - FF364b18 
+// • Light Blue - FF6387d2 
+// • Cyan       - FF267191 
+// • Blue       - FF253193 
+// • Purple     - FF7e34bf 
+// • Magenta    - FFbe49c9 
+// • Pink       - FFd98199 
+// • Brown      - FF56331c
+
+module.exports.wooden_plank = {
+  "0": "oak_wood_planks",
+  "1": "spruce_wood_planks",
+  "2": "birch_wood_planks",
+  "3": "jungle_wood_planks"
+}
+
+module.exports.wood = {
+  "0": "oak_wood",
+  "1": "spruce_wood",
+  "2": "birch_wood",
+  "3": "jungle_wood"
+}
+
+module.exports.leaves = {
+  "0": "oak_leaves",
+  "1": "spruce_leaves",
+  "2": "birch_leaves",
+  "3": "jungle_leaves"
+}
+
+module.exports.torches = {
+  "1": "east",
+  "2": "west",
+  "3": "south",
+  "4": "north",
+  "5": "floor",
+  "6": "ground" // not sure what the diff is between the last two
+}
+
+module.exports.slabs = {
+  "0": "stone_slab",
+  "1": "sandstone_slab",
+  "2": "wooden_slab",
+  "3": "cobblestone_slab",
+  "4": "brick_slab",
+  "5": "stone_brick_slab",
+  "6": "nether_brick_slab",
+  "7": "quartz_slab",
+  // double slabs only:
+  "8": "smooth_stone_slab",
+  "9": "smooth_sandstone_slab",
+  "15": "tile_quartz_slab" // note the underside
+}
+
+module.exports.wooden_slab = {
+  "0": "oak_wood_slab", 
+  "1": "spruce_wood_slab",
+  "2": "birch_wood_slab",
+  "3": "jungle_wood_slab"
+}
+
+module.exports.sandstone = {
+  "0": "normal",
+  "1": "chiseled",
+  "2": "smooth"
+}
+
+module.exports.bed = {
+  "0": "Head is pointing south",
+  "1": "Head is pointing west",
+  "2": "Head is pointing north",
+  "3": "Head is pointing east"
+}
+
+module.exports.grass = {
+  "0": "shrub", // (identical in appearance to block Dead Bush when placed, but acts like grass or fern)
+  "1": "grass",
+  "2": "fern",
+}
+
+// ascending direction
+module.exports.stairs = {
+  "0": "east",
+  "1": "west",
+  "2": "south",
+  "3": "north"
+}
+
+// facing direction
+module.exports.attachments = {
+  "0": "down",
+  "1": "up",
+  "2": "north",
+  "3": "south",
+  "4": "west",
+  "5": "east"
+}
+
+module.exports.cobblestone_wall = {
+  "0": "cobblestone",
+  "1": "moss_stone"
+}
+
+module.exports.quartz = {
+  "0": "quartz_block",
+  "1": "chiseled_quartz_block",
+  "2": "pillar_quartz_block_vertical",
+  "3": "pillar_quartz_block_north_south",
+  "4": "pillar_quartz_block_east_west"
+}
+
+module.exports.coal = {
+  "0": "coal",
+  "1": "charcoal"
+}
+
+module.exports.blocks = {
+  "_-1": {
+    id: -10,
+    type: "fill"
+  },
+  "_1": {
+    "type": "stone",
+    "id": 1
+  },
+  "_2": {
+    "type": "grass",
+    "id": 2
+  },
+  "_3": {
+    "type": "dirt",
+    "id": 3
+  },
+  "_4": {
+    "type": "cobblestone",
+    "id": 4
+  },
+  "_5": {
+    "type": "wooden_plank",
+    "id": 5,
+    "data": module.exports.wooden_plank
+  },
+  "_6": {
+    "type": "sapling",
+    "id": 6
+  },
+  "_7": {
+    "type": "adminium",
+    "id": 7
+  },
+  "_8": {
+    "type": "water",
+    "id": 8
+  },
+  "_9": {
+    "type": "stationary_water",
+    "id": 9
+  },
+  "_10": {
+    "type": "lava",
+    "id": 10
+  },
+  "_11": {
+    "type": "stationary_lava",
+    "id": 11
+  },
+  "_12": {
+    "type": "sand",
+    "id": 12
+  },
+  "_13": {
+    "type": "gravel",
+    "id": 13
+  },
+  "_14": {
+    "type": "gold_ore",
+    "id": 14
+  },
+  "_15": {
+    "type": "iron_ore",
+    "id": 15
+  },
+  "_16": {
+    "type": "coal_ore",
+    "id": 16
+  },
+  "_17": {
+    "type": "wood",
+    "id": 17,
+    "data": module.exports.wood
+  },
+  "_18": {
+    "type": "leaves",
+    "id": 18,
+    "data": module.exports.leaves
+  },
+  "_19": {
+    "type": "sponge",
+    "id": 19
+  },
+  "_20": {
+    "type": "glass",
+    "id": 20
+  },
+  "_21": {
+    "type": "lapis_lazuli_ore",
+    "id": 21
+  },
+  "_22": {
+    "type": "lapis_lazuli_block",
+    "id": 22
+  },
+  "_23": {
+    "type": "dispenser",
+    "id": 23,
+    "data": module.exports.attachments
+  },
+  "_24": {
+    "type": "sandstone",
+    "id": 24,
+    "data": module.exports.sandstone
+  },
+  "_25": {
+    "type": "note_block",
+    "id": 25
+  },
+  "_26": {
+    "type": "colored_wool",
+    "id": 26,
+    "data": module.exports.colored_wool
+  },
+  "_27": {
+    "type": "powered_rail",
+    "id": 27
+  },
+  "_28": {
+    "type": "detector_rail",
+    "id": 28
+  },
+  "_29": {
+    "type": "sticky_piston",
+    "id": 29
+  },
+  "_30": {
+    "type": "cobweb",
+    "id": 30
+  },
+  "_31": {
+    "type": "grass",
+    "id": 31,
+    "data": module.exports.grass
+  },
+  "_32": {
+    "type": "dead_bush",
+    "id": 32
+  },
+  "_33": {
+    "type": "piston",
+    "id": 33
+  },
+  "_34": {
+    "type": "black_wool",
+    "id": 34
+  },
+  "_35": {
+    "type": "wool",
+    "id": 35
+  },
+  "_36": {
+    "type": "wool",
+    "id": 36
+  },
+  "_37": {
+    "type": "yellow_flower",
+    "id": 37
+  },
+  "_38": {
+    "type": "red_flower",
+    "id": 38
+  },
+  "_39": {
+    "type": "brown_mushroom",
+    "id": 39
+  },
+  "_40": {
+    "type": "red_mushroom",
+    "id": 40
+  },
+  "_41": {
+    "type": "gold_block",
+    "id": 41
+  },
+  "_42": {
+    "type": "iron_block",
+    "id": 42
+  },
+  "_43": {
+    "type": "double_slabs",
+    "id": 43,
+    "data": module.exports.slabs
+  },
+  "_44": {
+    "type": "slabs",
+    "id": 44,
+    "data": module.exports.slabs
+  },
+  "_45": {
+    "type": "brick",
+    "id": 45
+  },
+  "_46": {
+    "type": "tnt",
+    "id": 46
+  },
+  "_47": {
+    "type": "bookshelf",
+    "id": 47
+  },
+  "_48": {
+    "type": "moss_stone",
+    "id": 48
+  },
+  "_49": {
+    "type": "obsidian",
+    "id": 49
+  },
+  "_50": {
+    "type": "torch",
+    "id": 50,
+    "data": module.exports.torches
+  },
+  "_51": {
+    "type": "fire",
+    "id": 51
+  },
+  "_52": {
+    "type": "monster_spawner",
+    "id": 52
+  },
+  "_53": {
+    "type": "wooden_stairs",
+    "id": 53,
+    "data": module.exports.stairs
+  },
+  "_54": {
+    "type": "chest",
+    "id": 54,
+    "data": module.exports.attachments
+  },
+  "_55": {
+    "type": "redstone_wire",
+    "id": 55
+  },
+  "_56": {
+    "type": "diamond_ore",
+    "id": 56
+  },
+  "_57": {
+    "type": "diamond_block",
+    "id": 57
+  },
+  "_58": {
+    "type": "workbench",
+    "id": 58
+  },
+  "_59": {
+    "type": "wheat_seeds",
+    "id": 59
+  },
+  "_60": {
+    "type": "soil",
+    "id": 60
+  },
+  "_61": {
+    "type": "furnace",
+    "id": 61,
+    "data": module.exports.attachments
+  },
+  "_62": {
+    "type": "burning_furnace",
+    "id": 62
+  },
+  "_63": {
+    "type": "signpost",
+    "id": 63
+  },
+  "_64": {
+    "type": "wooden_door",
+    "id": 64
+  },
+  "_65": {
+    "type": "ladder",
+    "id": 65,
+    "data": module.exports.attachments
+  },
+  "_66": {
+    "type": "minecart_track",
+    "id": 66
+  },
+  "_67": {
+    "type": "cobblestone_stairs",
+    "id": 67,
+    "data": module.exports.stairs
+  },
+  "_68": {
+    "type": "wall_sign",
+    "id": 68,
+    "data": module.exports.attachments
+  },
+  "_69": {
+    "type": "lever",
+    "id": 69
+  },
+  "_70": {
+    "type": "stone_pressure_plate",
+    "id": 70
+  },
+  "_71": {
+    "type": "iron_door",
+    "id": 71
+  },
+  "_72": {
+    "type": "wooden_pressure_plate",
+    "id": 72
+  },
+  "_73": {
+    "type": "redstone_ore",
+    "id": 73
+  },
+  "_74": {
+    "type": "glowing_redstone_ore",
+    "id": 74
+  },
+  "_75": {
+    "type": "redstone_torch_off",
+    "id": 75,
+    "data": module.exports.torches
+  },
+  "_76": {
+    "type": "redstone_torch_on",
+    "id": 76,
+    "data": module.exports.torches
+  },
+  "_77": {
+    "type": "stone_button",
+    "id": 77
+  },
+  "_78": {
+    "type": "snow",
+    "id": 78
+  },
+  "_79": {
+    "type": "ice",
+    "id": 79
+  },
+  "_80": {
+    "type": "snow_block",
+    "id": 80
+  },
+  "_81": {
+    "type": "cactus",
+    "id": 81
+  },
+  "_82": {
+    "type": "clay",
+    "id": 82
+  },
+  "_83": {
+    "type": "sugar_cane",
+    "id": 83
+  },
+  "_84": {
+    "type": "jukebox",
+    "id": 84
+  },
+  "_85": {
+    "type": "fence",
+    "id": 85
+  },
+  "_86": {
+    "type": "pumpkin",
+    "id": 86
+  },
+  "_87": {
+    "type": "netherrack",
+    "id": 87
+  },
+  "_88": {
+    "type": "soul_sand",
+    "id": 88
+  },
+  "_89": {
+    "type": "glowstone",
+    "id": 89
+  },
+  "_90": {
+    "type": "portal",
+    "id": 90
+  },
+  "_91": {
+    "type": "jack-o-lantern",
+    "id": 91
+  },
+  "_92": {
+    "type": "cake",
+    "id": 92
+  },
+  "_95": {
+    "type": "locked_chest",
+    "id": 95,
+    "data": module.exports.attachments
+  },
+  "_96": {
+    "type": "trapdoor",
+    "id": 96
+  },
+  "_97": {
+    "type": "monster_egg",
+    "id": 97
+  },
+  "_98": {
+    "type": "stone_brick",
+    "id": 98
+  },
+  "_99": {
+    "type": "huge_brown_mushroom",
+    "id": 99
+  },
+  "_100": {
+    "type": "huge_red_mushroom",
+    "id": 100
+  },
+  "_101": {
+    "type": "iron_bars",
+    "id": 101
+  },
+  "_102": {
+    "type": "glass_pane",
+    "id": 102
+  },
+  "_103": {
+    "type": "melon",
+    "id": 103
+  },
+  "_106": {
+    "type": "vines",
+    "id": 106
+  },
+  "_107": {
+    "type": "fence_gate",
+    "id": 107
+  },
+  "_108": {
+    "type": "brick_stairs",
+    "id": 108,
+    "data": module.exports.stairs
+  },
+  "_109": {
+    "type": "stone_brick_stairs",
+    "id": 109,
+    "data": module.exports.stairs
+  },
+  "_110": {
+    "type": "mycelium",
+    "id": 110
+  },
+  "_111": {
+    "type": "lily_pad",
+    "id": 111
+  },
+  "_112": {
+    "type": "nether_brick",
+    "id": 112
+  },
+  "_113": {
+    "type": "nether_brick_fence",
+    "id": 113
+  },
+  "_114": {
+    "type": "nether_brick_stairs",
+    "id": 114,
+    "data": module.exports.stairs
+  },
+  "_116": {
+    "type": "enchantment_table",
+    "id": 116
+  },
+  "_121": {
+    "type": "end_stone",
+    "id": 121
+  },
+  "_122": {
+    "type": "dragon_egg",
+    "id": 122
+  },
+  "_123": {
+    "type": "redstone_lamp",
+    "id": 123
+  },
+  "_126": {
+    "type": "wooden_slab",
+    "id": 126,
+    "data": module.exports.wooden_slab
+  },
+  "_127": {
+    "type": "cocoa_plant",
+    "id": 127
+  },
+  "_128": {
+    "type": "sandstone_stairs",
+    "id": 128,
+    "data": module.exports.stairs
+  },
+  "_129": {
+    "type": "emerald_ore",
+    "id": 129
+  },
+  "_130": {
+    "type": "ender_chest",
+    "id": 130,
+    "data": module.exports.attachments
+  },
+  "_133": {
+    "type": "block_of_emerald",
+    "id": 133
+  },
+  "_134": {
+    "type": "spruce_wood_stairs",
+    "id": 134,
+    "data": module.exports.stairs
+  },
+  "_135": {
+    "type": "birch_wood_stairs",
+    "id": 135,
+    "data": module.exports.stairs
+  },
+  "_136": {
+    "type": "jungle_wood_stairs",
+    "id": 136,
+    "data": module.exports.stairs
+  },
+  "_137": {
+    "type": "command_block",
+    "id": 137
+  },
+  "_138": {
+    "type": "beacon",
+    "id": 138
+  },
+  "_139": {
+    "type": "cobblestone_wall",
+    "id": 139,
+    "data": module.exports.cobblestone_wall
+  },
+  "_143": {
+    "type": "wooden_button",
+    "id": 143
+  },
+  "_145": {
+    "type": "anvil",
+    "id": 145
+  },
+  "_146" : {
+    "id": 146, 
+    "type": "trapped_chest",
+    "data": module.exports.attachments
+  },
+  "_147": {
+    "id": 147, 
+    "type": "weighted_pressure_plate_light"
+  },
+  "_148": {
+    "id": 148, 
+    "type": "weighted_pressure_plate_heavy"
+  },
+  "_149": {
+    "id": 149, 
+    "type": "redstone_comparator_inactive"
+  },
+  "_150": {
+    "id": 150, 
+    "type": "redstone_comparator_active"
+  },
+  "_151": {
+    "id": 151, 
+    "type": "daylight_sensor"
+  },
+  "_152": {
+    "id": 152, 
+    "type": "redstone_block"
+  },
+  "_153": {
+    "id": 153,
+    "type": "nether_quartz_ore"
+  },
+  "_154": {
+    "id": 154, 
+    "type": "hopper",
+    "data": module.exports.attachments
+  },
+  "_155": {
+    "id": 155, 
+    "type": "quartz_block"
+  },
+  "_156": {
+    "id": 156, 
+    "type": "quartz_stairs",
+    "data": module.exports.stairs
+  },
+  "_157": {
+    "id": 157, 
+    "type": "activator_rail"
+  },
+  "_158": {
+    "id": 158, 
+    "type": "dropper",
+    "data": module.exports.attachments
+  },
+  "_170": {
+    "id": 170, 
+    "type": "hay_bale"
+  },
+  "_171": {
+    "id": 171, 
+    "type": "carpet"
+  },
+  "_260": {
+    "type": "apple",
+    "id": 260
+  },
+  "_262": {
+    "type": "arrow",
+    "id": 262
+  },
+  "_263": {
+    "type": "coal",
+    "id": 263,
+    "data": module.exports.coal
+  },
+  "_264": {
+    "type": "diamond",
+    "id": 264
+  },
+  "_265": {
+    "type": "iron_ingot",
+    "id": 265
+  },
+  "_266": {
+    "type": "gold_ingot",
+    "id": 266
+  },
+  "_280": {
+    "type": "stick",
+    "id": 280
+  },
+  "_281": {
+    "type": "bowl",
+    "id": 281
+  },
+  "_282": {
+    "type": "mushroom_soup",
+    "id": 282
+  },
+  "_287": {
+    "type": "string",
+    "id": 287
+  },
+  "_288": {
+    "type": "feather",
+    "id": 288
+  },
+  "_289": {
+    "type": "gun_powder",
+    "id": 289
+  },
+  "_295": {
+    "type": "seeds",
+    "id": 295
+  },
+  "_296": {
+    "type": "wheat",
+    "id": 296
+  },
+  "_297": {
+    "type": "bread",
+    "id": 297
+  },
+  "_318": {
+    "type": "flint",
+    "id": 318
+  },
+  "_319": {
+    "type": "raw_porkchop",
+    "id": 319
+  },
+  "_320": {
+    "type": "cooked_porkchop",
+    "id": 320
+  },
+  "_321": {
+    "type": "paintings",
+    "id": 321
+  },
+  "_322": {
+    "type": "golden_apple",
+    "id": 322
+  },
+  "_323": {
+    "type": "sign",
+    "id": 323
+  },
+  "_324": {
+    "type": "wooden_door",
+    "id": 324
+  },
+  "_325": {
+    "type": "bucket",
+    "id": 325
+  },
+  "_326": {
+    "type": "water_bucket",
+    "id": 326
+  },
+  "_327": {
+    "type": "lava_bucket",
+    "id": 327
+  },
+  "_329": {
+    "type": "saddle",
+    "id": 329
+  },
+  "_330": {
+    "type": "iron_door",
+    "id": 330
+  },
+  "_331": {
+    "type": "redstone_dust",
+    "id": 331
+  },
+  "_332": {
+    "type": "snowball",
+    "id": 332
+  },
+  "_333": {
+    "type": "boat",
+    "id": 333
+  },
+  "_334": {
+    "type": "leather",
+    "id": 334
+  },
+  "_335": {
+    "type": "milk",
+    "id": 335
+  },
+  "_336": {
+    "type": "clay_brick",
+    "id": 336
+  },
+  "_337": {
+    "type": "clay_balls",
+    "id": 337
+  },
+  "_338": {
+    "type": "sugar_cane",
+    "id": 338
+  },
+  "_339": {
+    "type": "paper",
+    "id": 339
+  },
+  "_340": {
+    "type": "book",
+    "id": 340
+  },
+  "_341": {
+    "type": "slimeball",
+    "id": 341
+  },
+  "_344": {
+    "type": "egg",
+    "id": 344
+  },
+  "_346": {
+    "type": "fishing_rod",
+    "id": 346
+  },
+  "_348": {
+    "type": "glowstone_dust",
+    "id": 348
+  },
+  "_349": {
+    "type": "raw_fish",
+    "id": 349
+  },
+  "_350": {
+    "type": "cooked_fish",
+    "id": 350
+  },
+  "_351": {
+    "type": "dyes",
+    "id": 351
+  },
+  "_352": {
+    "type": "bone",
+    "id": 352
+  },
+  "_353": {
+    "type": "sugar",
+    "id": 353
+  },
+  "_354": {
+    "type": "cake",
+    "id": 354
+  },
+  "_354": {
+    "type": "bed",
+    "id": 355,
+    "data": module.exports.bed
+  },
+  "_356": {
+    "type": "redstone_repeater",
+    "id": 356
+  },
+  "_357": {
+    "type": "cookie",
+    "id": 357
+  },
+  "_358": {
+    "type": "map",
+    "id": 358
+  },
+  "_359": {
+    "type": "shears",
+    "id": 359
+  },
+  "_360": {
+    "type": "melon_slice",
+    "id": 360
+  },
+  "_361": {
+    "type": "pumpkin_seeds",
+    "id": 361
+  },
+  "_362": {
+    "type": "melon_seeds",
+    "id": 362
+  },
+  "_363": {
+    "type": "raw_beef",
+    "id": 363
+  },
+  "_364": {
+    "type": "steak",
+    "id": 364
+  },
+  "_365": {
+    "type": "raw_chicken",
+    "id": 365
+  },
+  "_366": {
+    "type": "cooked_chicken",
+    "id": 366
+  },
+  "_367": {
+    "type": "rotton_flesh",
+    "id": 367
+  },
+  "_368": {
+    "type": "ender_pearl",
+    "id": 368
+  },
+  "_369": {
+    "type": "blaze_rod",
+    "id": 369
+  },
+  "_370": {
+    "type": "ghast_tear",
+    "id": 370
+  },
+  "_374": {
+    "type": "glass_bottle",
+    "id": 374
+  },
+  "_375": {
+    "type": "spider_eye",
+    "id": 375
+  },
+  "_376": {
+    "type": "fermented_spider_eye",
+    "id": 376
+  },
+  "_377": {
+    "type": "blaze_powder",
+    "id": 377
+  },
+  "_378": {
+    "type": "magma_cream",
+    "id": 378
+  },
+  "_379": {
+    "type": "brewing_stand",
+    "id": 379
+  },
+  "_380": {
+    "type": "cauldron",
+    "id": 380
+  },
+  "_381": {
+    "type": "eye_of_ender",
+    "id": 381
+  },
+  "_382": {
+    "type": "glistering_melon",
+    "id": 382
+  },
+  "_383": {
+    "type": "spawn_eggs",
+    "id": 383
+  },
+  "_384": {
+    "type": "bottle_o_enchanting",
+    "id": 384
+  },
+  "_385": {
+    "type": "fire_charge",
+    "id": 385
+  },
+  "_388": {
+    "type": "emerald",
+    "id": 388
+  },
+  "_390": {
+    "type": "flower_pot",
+    "id": 390
+  },
+  "_391": {
+    "type": "carrot",
+    "id": 391
+  },
+  "_392": {
+    "type": "unknown",
+    "id": 392
+  },
+  "_393": {
+    "type": "baked_potato",
+    "id": 393
+  },
+  "_394": {
+    "type": "poisonous_potato",
+    "id": 394
+  },
+  "_395": {
+    "type": "map",
+    "id": 395
+  },
+  "_396": {
+    "type": "golden_carrot",
+    "id": 396
+  },
+  "_397": {
+    "type": "mob_head",
+    "id": 397
+  },
+  "_399": {
+    "type": "nether_star",
+    "id": 399
+  },
+  "_400": {
+    "type": "pumkpin_pie",
+    "id": 400
+  },
+  "_401": {
+    "type": "firework_rocket",
+    "id": 401
+  },
+  "_402": {
+    "type": "firework_star",
+    "id": 402
+  }
+}
+},{}],20:[function(require,module,exports){
 (function(){var dataview = require('jDataView');
 
 // Generated by CoffeeScript 1.6.2
@@ -10867,7 +10187,7 @@ module.exports.typeToCoords = typeToCoords;
 })(module.exports);
 
 })()
-},{"jDataView":34}],37:[function(require,module,exports){
+},{"jDataView":17}],21:[function(require,module,exports){
 /** @license zlib.js 2012 - imaya [ https://github.com/imaya/zlib.js ] The MIT License */
 (function() {'use strict';var aa=this;function g(a,b,d){a=a.split(".");d=d||aa;!(a[0]in d)&&d.execScript&&d.execScript("var "+a[0]);for(var c;a.length&&(c=a.shift());)!a.length&&void 0!==b?d[c]=b:d=d[c]?d[c]:d[c]={}}Math.floor(2147483648*Math.random()).toString(36);var j="undefined"!==typeof Uint8Array&&"undefined"!==typeof Uint16Array&&"undefined"!==typeof Uint32Array;var ba=new (j?Uint8Array:Array)(256),l;for(l=0;256>l;++l){for(var ca=ba,da=l,n=l,o=n,q=7,n=n>>>1;n;n>>>=1)o<<=1,o|=n&1,--q;ca[da]=(o<<q&255)>>>0};var ea=[0,1996959894,3993919788,2567524794,124634137,1886057615,3915621685,2657392035,249268274,2044508324,3772115230,2547177864,162941995,2125561021,3887607047,2428444049,498536548,1789927666,4089016648,2227061214,450548861,1843258603,4107580753,2211677639,325883990,1684777152,4251122042,2321926636,335633487,1661365465,4195302755,2366115317,997073096,1281953886,3579855332,2724688242,1006888145,1258607687,3524101629,2768942443,901097722,1119000684,3686517206,2898065728,853044451,1172266101,3705015759,
 2882616665,651767980,1373503546,3369554304,3218104598,565507253,1454621731,3485111705,3099436303,671266974,1594198024,3322730930,2970347812,795835527,1483230225,3244367275,3060149565,1994146192,31158534,2563907772,4023717930,1907459465,112637215,2680153253,3904427059,2013776290,251722036,2517215374,3775830040,2137656763,141376813,2439277719,3865271297,1802195444,476864866,2238001368,4066508878,1812370925,453092731,2181625025,4111451223,1706088902,314042704,2344532202,4240017532,1658658271,366619977,
@@ -10898,7 +10218,7 @@ U.prototype.m=function(){var a=this.input,b;b=this.s.m();this.a=this.s.a;if(this
 D.ADAPTIVE=D.u;D.BLOCK=D.v;g("Zlib.Inflate.prototype.decompress",U.prototype.m,void 0);var ja=[16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15];j&&new Uint16Array(ja);var ka=[3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258,258,258];j&&new Uint16Array(ka);var la=[0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0];j&&new Uint8Array(la);var ma=[1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];j&&new Uint16Array(ma);
 var na=[0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];j&&new Uint8Array(na);var W=new (j?Uint8Array:Array)(288),X,Y;X=0;for(Y=W.length;X<Y;++X)W[X]=143>=X?8:255>=X?9:279>=X?7:8;r(W);var Z=new (j?Uint8Array:Array)(30),$,oa;$=0;for(oa=Z.length;$<oa;++$)Z[$]=5;r(Z);var V=8;}).call(module.exports);
 
-},{}],38:[function(require,module,exports){
+},{}],22:[function(require,module,exports){
 (function(process,Buffer){/** @license zlib.js 2012 - imaya [ https://github.com/imaya/zlib.js ] The MIT License */
 (function() {'use strict';function m(a){throw a;}var p=void 0,u=!0;var A="undefined"!==typeof Uint8Array&&"undefined"!==typeof Uint16Array&&"undefined"!==typeof Uint32Array;function I(a,c){this.index="number"===typeof c?c:0;this.bitindex=0;this.buffer=a instanceof(A?Uint8Array:Array)?a:new (A?Uint8Array:Array)(32768);2*this.buffer.length<=this.index&&m(Error("invalid index"));this.buffer.length<=this.index&&this.expandBuffer()}I.prototype.expandBuffer=function(){var a=this.buffer,c,b=a.length,d=new (A?Uint8Array:Array)(b<<1);if(A)d.set(a);else for(c=0;c<b;++c)d[c]=a[c];return this.buffer=d};
 I.prototype.writeBits=function(a,c,b){var d=this.buffer,f=this.index,e=this.bitindex,g=d[f],h;b&&1<c&&(a=8<c?(K[a&255]<<24|K[a>>>8&255]<<16|K[a>>>16&255]<<8|K[a>>>24&255])>>32-c:K[a]>>8-c);if(8>c+e)g=g<<c|a,e+=c;else for(h=0;h<c;++h)g=g<<1|a>>c-h-1&1,8===++e&&(e=0,d[f++]=K[g],g=0,f===d.length&&(d=this.expandBuffer()));d[f]=g;this.buffer=d;this.bitindex=e;this.index=f};
@@ -10957,1362 +10277,250 @@ function Hb(a,c){var b;a.subarray=a.slice;b=(new Db(a)).decompress();c||(c={});r
 function Mb(a){var c=new Buffer(a.length),b,d;b=0;for(d=a.length;b<d;++b)c[b]=a[b];return c};var Cb=8;}).call(this);
 
 })(require("__browserify_process"),require("__browserify_Buffer").Buffer)
-},{"__browserify_Buffer":10,"__browserify_process":11}],39:[function(require,module,exports){
-// mostly from http://www.minecraftwiki.net/wiki/Data_values#Data
+},{"__browserify_Buffer":10,"__browserify_process":11}],23:[function(require,module,exports){
+var leveljs = require('level-js')
+var crunch = require('voxel-crunch')
 
-// TODO (fork and contribute!): water, lava, fire, saplings, wood rotation, decay of leaves, slab orientation, piston, piston extension, redstone wire, crops, sign posts, farmland, door, rails, levers, pressure plates, buttons, snowfall, cacti, sugar cane, jukebox, pumpkins, cake, redstone repeaters, trapdoors, monster egg, stone brick, mushrooms, stems, vines, fence gates, nether wart, brewing stand, cauldron, end portal block, cocoas, tripwire hook, tripwire, flower pots, heads, dyes, anvil, potions, status effects, spawn eggs, golden apple
+module.exports = VoxelLevel
 
-module.exports.colored_wool = {
-  "0":   {"color": "ffffff", "name": "white_wool"},
-  "1":   {"color": "ffa800", "name": "orange_wool"},
-  "2":   {"color": "ea01ff", "name": "magenta_wool"},
-  "3":   {"color": "b1eeff", "name": "light_blue_wool"},
-  "4":   {"color": "fdfa00", "name": "yellow_wool"},
-  "5":   {"color": "54ff00", "name": "lime_wool"},
-  "6":   {"color": "ff00ea", "name": "pink_wool"},
-  "7":   {"color": "b8b8b8", "name": "dark_gray_wool"},
-  "8":   {"color": "ebebeb", "name": "light_gray_wool"},
-  "9":   {"color": "2efff8", "name": "light_blue_wool"},
-  "10":  {"color": "9e0ec7", "name": "purple_wool"},
-  "11":  {"color": "1334ff", "name": "dark_blue_wool"},
-  "12":  {"color": "896862", "name": "brown_wool"},
-  "13":  {"color": "0c840f", "name": "green_wool"},
-  "14":  {"color": "f00000", "name": "red_wool"},
-  "15":  {"color": "000000", "name": "black_wool"}
+function VoxelLevel(db) {
+  if (!(this instanceof VoxelLevel)) return new VoxelLevel(db)
+  this.db = db
+  return true
 }
 
-// alternative wool colors
-// • White      - FFe4e4e4 
-// • Light Gray - FFa0a7a7 
-// • Dark Gray  - FF414141 
-// • Black      - FF181414 
-// • Red        - FF9e2b27 
-// • Orange     - FFea7e35 
-// • Yellow     - FFc2b51c 
-// • Lime Green - FF39ba2e 
-// • Green      - FF364b18 
-// • Light Blue - FF6387d2 
-// • Cyan       - FF267191 
-// • Blue       - FF253193 
-// • Purple     - FF7e34bf 
-// • Magenta    - FFbe49c9 
-// • Pink       - FFd98199 
-// • Brown      - FF56331c
-
-module.exports.wooden_plank = {
-  "0": "oak_wood_planks",
-  "1": "spruce_wood_planks",
-  "2": "birch_wood_planks",
-  "3": "jungle_wood_planks"
+VoxelLevel.prototype.load = function(worldName, chunkPosition, dimensions, cb) {
+  var chunkLength = dimensions[0] * dimensions[1] * dimensions[2]
+  var chunkIndex = chunkPosition.join('|') + '|' + chunkLength
+  this.db.sublevel(worldName).get(chunkIndex, { valueEncoding: 'binary' }, function(err, rle) {
+    if (err) return cb(err)
+    var voxels = new Uint8Array(chunkLength)
+    crunch.decode(rle, voxels)
+    cb(false, {position: chunkPosition, voxels: voxels, dimensions: dimensions})
+  })
 }
 
-module.exports.wood = {
-  "0": "oak_wood",
-  "1": "spruce_wood",
-  "2": "birch_wood",
-  "3": "jungle_wood"
+VoxelLevel.prototype.store = function(worldName, chunk, cb) {
+  var rle = crunch.encode(chunk.voxels)
+  var key = chunk.position.join('|')
+  key += '|' + chunk.voxels.length
+  this.db.sublevel(worldName).put(key, rle, { valueEncoding: 'binary' }, cb)
 }
 
-module.exports.leaves = {
-  "0": "oak_leaves",
-  "1": "spruce_leaves",
-  "2": "birch_leaves",
-  "3": "jungle_leaves"
+},{"level-js":24,"voxel-crunch":31}],24:[function(require,module,exports){
+module.exports = Level
+
+var IDB = require('idb-wrapper')
+var AbstractLevelDOWN = require('abstract-leveldown').AbstractLevelDOWN
+var util = require('util')
+var Iterator = require('./iterator')
+var isBuffer = require('isbuffer')
+
+function Level(location) {
+  if (!(this instanceof Level)) return new Level(location)
+  if (!location) throw new Error("constructor requires at least a location argument")
+  
+  this.location = location
 }
 
-module.exports.leaves_opaque = {
-  "0": "oak_leaves_opaque",
-  "1": "spruce_leaves_opaque",
-  "2": "birch_leaves_opaque",
-  "3": "jungle_leaves_opaque"
+util.inherits(Level, AbstractLevelDOWN)
+
+Level.prototype._open = function(options, callback) {
+  var self = this
+  
+  this.idb = new IDB({
+    storeName: this.location,
+    autoIncrement: false,
+    keyPath: null,
+    onStoreReady: function () {
+      callback && callback(null, self.idb)
+    }, 
+    onError: function(err) {
+      callback && callback(err)
+    }
+  })
 }
 
-module.exports.torches = {
-  "1": "east",
-  "2": "west",
-  "3": "south",
-  "4": "north",
-  "5": "floor",
-  "6": "ground" // not sure what the diff is between the last two
+Level.prototype._get = function (key, options, callback) {
+  this.idb.get(key, function (value) {
+    if (value === undefined) {
+      // 'NotFound' error, consistent with LevelDOWN API
+      return callback(new Error('NotFound'))
+    }
+    if (options.asBuffer !== false && !isBuffer(value))
+      value = StringToArrayBuffer(String(value))
+    return callback(null, value, key)
+  }, callback)
 }
 
-module.exports.slabs = {
-  "0": "stone_slab",
-  "1": "sandstone_slab",
-  "2": "wooden_slab",
-  "3": "cobblestone_slab",
-  "4": "brick_slab",
-  "5": "stone_brick_slab",
-  "6": "nether_brick_slab",
-  "7": "quartz_slab",
-  // double slabs only:
-  "8": "smooth_stone_slab",
-  "9": "smooth_sandstone_slab",
-  "15": "tile_quartz_slab" // note the underside
+Level.prototype._del = function(id, options, callback) {
+  this.idb.remove(id, callback, callback)
 }
 
-module.exports.wooden_slab = {
-  "0": "oak_wood_slab", 
-  "1": "spruce_wood_slab",
-  "2": "birch_wood_slab",
-  "3": "jungle_wood_slab"
+Level.prototype._put = function (key, value, options, callback) {
+  this.idb.put(key, value, function() { callback() }, callback)
 }
 
-module.exports.sandstone = {
-  "0": "normal",
-  "1": "chiseled",
-  "2": "smooth"
+Level.prototype.iterator = function (options) {
+  if (typeof options !== 'object') options = {}
+  return new Iterator(this.idb, options)
 }
 
-module.exports.bed = {
-  "0": "Head is pointing south",
-  "1": "Head is pointing west",
-  "2": "Head is pointing north",
-  "3": "Head is pointing east"
-}
+Level.prototype._batch = function (array, options, callback) {
+  var op
+    , i
 
-module.exports.grass = {
-  "0": "shrub", // (identical in appearance to block Dead Bush when placed, but acts like grass or fern)
-  "1": "grass",
-  "2": "fern",
-}
+  for (i=0; i < array.length; i++) {
+    op = array[i]
 
-// ascending direction
-module.exports.stairs = {
-  "0": "east",
-  "1": "west",
-  "2": "south",
-  "3": "north"
-}
-
-// facing direction
-module.exports.attachments = {
-  "0": "down",
-  "1": "up",
-  "2": "north",
-  "3": "south",
-  "4": "west",
-  "5": "east"
-}
-
-module.exports.cobblestone_wall = {
-  "0": "cobblestone",
-  "1": "moss_stone"
-}
-
-module.exports.quartz = {
-  "0": "quartz_block",
-  "1": "chiseled_quartz_block",
-  "2": "pillar_quartz_block_vertical",
-  "3": "pillar_quartz_block_north_south",
-  "4": "pillar_quartz_block_east_west"
-}
-
-module.exports.coal = {
-  "0": "coal",
-  "1": "charcoal"
-}
-
-module.exports.blocks = {
-  "_-1": {
-    "id": -10,
-    "type": "fill",
-    "color": "#6e562c"
-  },
-  "_1": {
-    "type": "stone",
-    "id": 1,
-    "color": "#807f66"
-  },
-  "_2": {
-    "type": "grass",
-    "id": 2,
-    "color": "#04520f"
-  },
-  "_3": {
-    "type": "dirt",
-    "id": 3,
-    "color": "#6e562c"
-  },
-  "_4": {
-    "type": "cobblestone",
-    "id": 4,
-    "color": "#6d6d6d"
-  },
-  "_5": {
-    "type": "wooden_plank",
-    "id": 5,
-    "color": "#a4844c",
-    "data": module.exports.wooden_plank
-  },
-  "_6": {
-    "type": "sapling",
-    "id": 6,
-    "color": "#3c1c04"
-  },
-  "_7": {
-    "type": "adminium",
-    "id": 7,
-    "color": "#8a8872"
-  },
-  "_8": {
-    "type": "water",
-    "id": 8,
-    "color": "#6c8cdc"
-  },
-  "_9": {
-    "type": "stationary_water",
-    "id": 9,
-    "color": "#4c54fc"
-  },
-  "_10": {
-    "type": "lava",
-    "id": 10,
-    "color": "#fca404"
-  },
-  "_11": {
-    "type": "stationary_lava",
-    "id": 11,
-    "color": "#fca404"
-  },
-  "_12": {
-    "type": "sand",
-    "id": 12,
-    "color": "#d8d3b5"
-  },
-  "_13": {
-    "type": "gravel",
-    "id": 13,
-    "color": "#565032"
-  },
-  "_14": {
-    "type": "gold_ore",
-    "id": 14,
-    "color": "#7a7761"
-  },
-  "_15": {
-    "type": "iron_ore",
-    "id": 15,
-    "color": "#898b78"
-  },
-  "_16": {
-    "type": "coal_ore",
-    "id": 16,
-    "color": "#232318"
-  },
-  "_17": {
-    "type": "wood",
-    "id": 17,
-    "color": "#401409",
-    "data": module.exports.wood
-  },
-  "_18": {
-    "type": "leaves",
-    "id": 18,
-    "color": "#044604",
-    "data": module.exports.leaves
-  },
-  "_19": {
-    "type": "sponge",
-    "id": 19,
-    "color": "#dad5a3"
-  },
-  "_20": {
-    "type": "glass",
-    "id": 20,
-    "color": "#5e7479"
-  },
-  "_21": {
-    "type": "lapis_lazuli_ore",
-    "id": 21,
-    "color": "#777763"
-  },
-  "_22": {
-    "type": "lapis_lazuli_block",
-    "id": 22,
-    "color": "#1632ac"
-  },
-  "_23": {
-    "type": "dispenser",
-    "id": 23,
-    "color": "#a3a18f",
-    "data": module.exports.attachments
-  },
-  "_24": {
-    "type": "sandstone",
-    "id": 24,
-    "color": "#d4d0ad",
-    "data": module.exports.sandstone
-  },
-  "_25": {
-    "type": "note_block",
-    "id": 25,
-    "color": "#633604"
-  },
-  "_26": {
-    "type": "colored_wool",
-    "id": 26,
-    "color": "#a90c14",
-    "data": module.exports.colored_wool
-  },
-  "_27": {
-    "type": "powered_rail",
-    "id": 27,
-    "color": "#dea055"
-  },
-  "_28": {
-    "type": "detector_rail",
-    "id": 28,
-    "color": "#dd7442"
-  },
-  "_29": {
-    "type": "sticky_piston",
-    "id": 29,
-    "color": "#69590f"
-  },
-  "_30": {
-    "type": "cobweb",
-    "id": 30,
-    "color": "#f4f4f4"
-  },
-  "_31": {
-    "type": "grass",
-    "id": 31,
-    "color": "#04520f",
-    "data": module.exports.grass
-  },
-  "_32": {
-    "type": "dead_bush",
-    "id": 32,
-    "color": "#647c0c"
-  },
-  "_33": {
-    "type": "piston",
-    "id": 33,
-    "color": "#a09e92"
-  },
-  "_34": {
-    "type": "black_wool",
-    "id": 34,
-    "color": "#1e1c1c"
-  },
-  "_35": {
-    "type": "wool",
-    "id": 35,
-    "color": "#e8e8e8"
-  },
-  "_36": {
-    "type": "wool",
-    "id": 36,
-    "color": "#e8e8e8"
-  },
-  "_37": {
-    "type": "yellow_flower",
-    "id": 37,
-    "color": "#f4dc54"
-  },
-  "_38": {
-    "type": "red_flower",
-    "id": 38,
-    "color": "#f4dc54"
-  },
-  "_39": {
-    "type": "brown_mushroom",
-    "id": 39,
-    "color": "#bfaa88"
-  },
-  "_40": {
-    "type": "red_mushroom",
-    "id": 40,
-    "color": "#8c8474"
-  },
-  "_41": {
-    "type": "gold_block",
-    "id": 41,
-    "color": "#e0c474"
-  },
-  "_42": {
-    "type": "iron_block",
-    "id": 42,
-    "color": "#b0b0b0"
-  },
-  "_43": {
-    "type": "double_slabs",
-    "id": 43,
-    "color": "#5f5e49",
-    "data": module.exports.slabs
-  },
-  "_44": {
-    "type": "slabs",
-    "id": 44,
-    "color": "#9e9d88",
-    "data": module.exports.slabs
-  },
-  "_45": {
-    "type": "brick",
-    "id": 45,
-    "color": "#844214"
-  },
-  "_46": {
-    "type": "tnt",
-    "id": 46,
-    "color": "#413109"
-  },
-  "_47": {
-    "type": "bookshelf",
-    "id": 47,
-    "color": "#642208"
-  },
-  "_48": {
-    "type": "moss_stone",
-    "id": 48,
-    "color": "#577b37"
-  },
-  "_49": {
-    "type": "obsidian",
-    "id": 49,
-    "color": "#0c0c0c"
-  },
-  "_50": {
-    "type": "torch",
-    "id": 50,
-    "color": "#6c6c6c",
-    "data": module.exports.torches
-  },
-  "_51": {
-    "type": "fire",
-    "id": 51,
-    "color": "#fcac04"
-  },
-  "_52": {
-    "type": "monster_spawner",
-    "id": 52,
-    "color": "#477c20"
-  },
-  "_53": {
-    "type": "wooden_stairs",
-    "id": 53,
-    "color": "#7c744e"
-  },
-  "_54": {
-    "type": "chest",
-    "id": 54,
-    "color": "#5e3205",
-    "data": module.exports.attachments
-  },
-  "_55": {
-    "type": "redstone_wire",
-    "id": 55,
-    "color": "#d4bcb4"
-  },
-  "_56": {
-    "type": "diamond_ore",
-    "id": 56,
-    "color": "#86846e"
-  },
-  "_57": {
-    "type": "diamond_block",
-    "id": 57,
-    "color": "#4a6676"
-  },
-  "_58": {
-    "type": "workbench",
-    "id": 58,
-    "color": "#4e2607"
-  },
-  "_59": {
-    "type": "wheat_seeds",
-    "id": 59,
-    "color": "#c1a648"
-  },
-  "_60": {
-    "type": "soil",
-    "id": 60,
-    "color": "#6e562c"
-  },
-  "_61": {
-    "type": "furnace",
-    "id": 61,
-    "color": "#8c8676",
-    "data": module.exports.attachments
-  },
-  "_62": {
-    "type": "burning_furnace",
-    "id": 62,
-    "color": "#8c8676"
-  },
-  "_63": {
-    "type": "signpost",
-    "id": 63,
-    "color": "#4a2404"
-  },
-  "_64": {
-    "type": "wooden_door",
-    "id": 64,
-    "color": "#5e3205"
-  },
-  "_65": {
-    "type": "ladder",
-    "id": 65,
-    "color": "#542404",
-    "data": module.exports.attachments
-  },
-  "_66": {
-    "type": "minecart_track",
-    "id": 66,
-    "color": "#818181"
-  },
-  "_67": {
-    "type": "cobblestone_stairs",
-    "id": 67,
-    "color": "#807f66",
-    "data": module.exports.stairs
-  },
-  "_68": {
-    "type": "wall_sign",
-    "id": 68,
-    "color": "#4a2404",
-    "data": module.exports.attachments
-  },
-  "_69": {
-    "type": "lever",
-    "id": 69,
-    "color": "#4c2404"
-  },
-  "_70": {
-    "type": "stone_pressure_plate",
-    "id": 70,
-    "color": "#807f66"
-  },
-  "_71": {
-    "type": "iron_door",
-    "id": 71,
-    "color": "#28282f"
-  },
-  "_72": {
-    "type": "wooden_pressure_plate",
-    "id": 72,
-    "color": "#7c744e"
-  },
-  "_73": {
-    "type": "redstone_ore",
-    "id": 73,
-    "color": "#81806a"
-  },
-  "_74": {
-    "type": "glowing_redstone_ore",
-    "id": 74,
-    "color": "#81806a"
-  },
-  "_75": {
-    "type": "redstone_torch_off",
-    "id": 75,
-    "color": "#6c6c6c",
-    "data": module.exports.torches
-  },
-  "_76": {
-    "type": "redstone_torch_on",
-    "id": 76,
-    "color": "#6c6c6c",
-    "data": module.exports.torches
-  },
-  "_77": {
-    "type": "stone_button",
-    "id": 77,
-    "color": "#807f66"
-  },
-  "_78": {
-    "type": "snow",
-    "id": 78,
-    "color": "#f4fcfc"
-  },
-  "_79": {
-    "type": "ice",
-    "id": 79,
-    "color": "#719bfb"
-  },
-  "_80": {
-    "type": "snow_block",
-    "id": 80,
-    "color": "#f4fcfc"
-  },
-  "_81": {
-    "type": "cactus",
-    "id": 81,
-    "color": "#849c14"
-  },
-  "_82": {
-    "type": "clay",
-    "id": 82,
-    "color": "#90491e"
-  },
-  "_83": {
-    "type": "sugar_cane",
-    "id": 83,
-    "color": "#046404"
-  },
-  "_84": {
-    "type": "jukebox",
-    "id": 84,
-    "color": "#633604"
-  },
-  "_85": {
-    "type": "fence",
-    "id": 85,
-    "color": "#9c9ca4"
-  },
-  "_86": {
-    "type": "pumpkin",
-    "id": 86,
-    "color": "#ce7104"
-  },
-  "_87": {
-    "type": "netherrack",
-    "id": 87,
-    "color": "#9f514b"
-  },
-  "_88": {
-    "type": "soul_sand",
-    "id": 88,
-    "color": "#d8d3b5"
-  },
-  "_89": {
-    "type": "glowstone",
-    "id": 89,
-    "color": "#e5ad54"
-  },
-  "_90": {
-    "type": "portal",
-    "id": 90,
-    "color": "#9f514b"
-  },
-  "_91": {
-    "type": "jack-o-lantern",
-    "id": 91,
-    "color": "#f8da19"
-  },
-  "_92": {
-    "type": "cake",
-    "id": 92,
-    "color": "#eeeece"
-  },
-  "_95": {
-    "type": "locked_chest",
-    "id": 95,
-    "color": "#5e3205",
-    "data": module.exports.attachments
-  },
-  "_96": {
-    "type": "trapdoor",
-    "id": 96,
-    "color": "#5f3004"
-  },
-  "_97": {
-    "type": "monster_egg",
-    "id": 97,
-    "color": "#477c20"
-  },
-  "_98": {
-    "type": "stone_brick",
-    "id": 98,
-    "color": "#524d37"
-  },
-  "_99": {
-    "type": "huge_brown_mushroom",
-    "id": 99,
-    "color": "#a47c5c"
-  },
-  "_100": {
-    "type": "huge_red_mushroom",
-    "id": 100,
-    "color": "#8c8474"
-  },
-  "_101": {
-    "type": "iron_bars",
-    "id": 101,
-    "color": "#9c9ca4"
-  },
-  "_102": {
-    "type": "glass_pane",
-    "id": 102,
-    "color": "#5e7479"
-  },
-  "_103": {
-    "type": "melon",
-    "id": 103,
-    "color": "#338204"
-  },
-  "_106": {
-    "type": "vines",
-    "id": 106,
-    "color": "#043a04"
-  },
-  "_107": {
-    "type": "fence_gate",
-    "id": 107,
-    "color": "#9c9ca4"
-  },
-  "_108": {
-    "type": "brick_stairs",
-    "id": 108,
-    "color": "#844214",
-    "data": module.exports.stairs
-  },
-  "_109": {
-    "type": "stone_brick_stairs",
-    "id": 109,
-    "color": "#807f66",
-    "data": module.exports.stairs
-  },
-  "_110": {
-    "type": "mycelium",
-    "id": 110,
-    "color": "#c7bea7"
-  },
-  "_111": {
-    "type": "lily_pad",
-    "id": 111,
-    "color": "#2c6404"
-  },
-  "_112": {
-    "type": "nether_brick",
-    "id": 112,
-    "color": "#9f514b"
-  },
-  "_113": {
-    "type": "nether_brick_fence",
-    "id": 113,
-    "color": "#9c9ca4"
-  },
-  "_114": {
-    "type": "nether_brick_stairs",
-    "id": 114,
-    "color": "#9f514b",
-    "data": module.exports.stairs
-  },
-  "_116": {
-    "type": "enchantment_table",
-    "id": 116,
-    "color": "#2c2c2c"
-  },
-  "_121": {
-    "type": "end_stone",
-    "id": 121,
-    "color": "#cccca2"
-  },
-  "_122": {
-    "type": "dragon_egg",
-    "id": 122,
-    "color": "#0c0c0c"
-  },
-  "_123": {
-    "type": "redstone_lamp",
-    "id": 123,
-    "color": "#4f4528"
-  },
-  "_126": {
-    "type": "wooden_slab",
-    "id": 126,
-    "color": "#a4844c",
-    "data": module.exports.wooden_slab
-  },
-  "_127": {
-    "type": "cocoa_plant",
-    "id": 127,
-    "color": "#542404"
-  },
-  "_128": {
-    "type": "sandstone_stairs",
-    "id": 128,
-    "color": "#d4d0ad",
-    "data": module.exports.stairs
-  },
-  "_129": {
-    "type": "emerald_ore",
-    "id": 129,
-    "color": "#8a8a74"
-  },
-  "_130": {
-    "type": "ender_chest",
-    "id": 130,
-    "color": "#5e3205",
-    "data": module.exports.attachments
-  },
-  "_133": {
-    "type": "block_of_emerald",
-    "id": 133,
-    "color": "#0b8c04"
-  },
-  "_134": {
-    "type": "spruce_wood_stairs",
-    "id": 134,
-    "color": "#3b2821",
-    "data": module.exports.stairs
-  },
-  "_135": {
-    "type": "birch_wood_stairs",
-    "id": 135,
-    "color": "#7c744e",
-    "data": module.exports.stairs
-  },
-  "_136": {
-    "type": "jungle_wood_stairs",
-    "id": 136,
-    "color": "#4c341c",
-    "data": module.exports.stairs
-  },
-  "_137": {
-    "type": "command_block",
-    "id": 137,
-    "color": "#be8a6d"
-  },
-  "_138": {
-    "type": "beacon",
-    "id": 138,
-    "color": "#5c7074"
-  },
-  "_139": {
-    "type": "cobblestone_wall",
-    "id": 139,
-    "color": "#6d6d6d",
-    "data": module.exports.cobblestone_wall
-  },
-  "_143": {
-    "type": "wooden_button",
-    "id": 143,
-    "color": "#7c744e"
-  },
-  "_145": {
-    "type": "anvil",
-    "id": 145,
-    "color": "#242424"
-  },
-  "_146": {
-    "id": 146,
-    "type": "trapped_chest",
-    "color": "#5e3205",
-    "data": module.exports.attachments
-  },
-  "_147": {
-    "id": 147,
-    "type": "weighted_pressure_plate_light",
-    "color": "#807f66"
-  },
-  "_148": {
-    "id": 148,
-    "type": "weighted_pressure_plate_heavy",
-    "color": "#807f66"
-  },
-  "_149": {
-    "id": 149,
-    "type": "redstone_comparator_inactive",
-    "color": "#a7a49e"
-  },
-  "_150": {
-    "id": 150,
-    "type": "redstone_comparator_active",
-    "color": "#9f9c96"
-  },
-  "_151": {
-    "id": 151,
-    "type": "daylight_sensor",
-    "color": "#443c2c"
-  },
-  "_152": {
-    "id": 152,
-    "type": "redstone_block",
-    "color": "#980404"
-  },
-  "_153": {
-    "id": 153,
-    "type": "nether_quartz_ore",
-    "color": "#874944"
-  },
-  "_154": {
-    "id": 154,
-    "type": "hopper",
-    "color": "#242424",
-    "data": module.exports.attachments
-  },
-  "_155": {
-    "id": 155,
-    "type": "quartz_block",
-    "color": "#bdb8b0"
-  },
-  "_156": {
-    "id": 156,
-    "type": "quartz_stairs",
-    "color": "#807f66",
-    "data": module.exports.stairs
-  },
-  "_157": {
-    "id": 157,
-    "type": "activator_rail",
-    "color": "#828282"
-  },
-  "_158": {
-    "id": 158,
-    "type": "dropper",
-    "color": "#a2a18e",
-    "data": module.exports.attachments
-  },
-  "_170": {
-    "id": 170,
-    "type": "hay_bale",
-    "color": "#c1a648"
-  },
-  "_171": {
-    "id": 171,
-    "type": "carpet",
-    "color": "#577b37"
-  },
-  "_260": {
-    "type": "apple",
-    "id": 260,
-    "color": "#644411"
-  },
-  "_262": {
-    "type": "arrow",
-    "id": 262,
-    "color": "#4c2404"
-  },
-  "_263": {
-    "type": "coal",
-    "id": 263,
-    "color": "#232318",
-    "data": module.exports.coal
-  },
-  "_264": {
-    "type": "diamond",
-    "id": 264,
-    "color": "#4a6676"
-  },
-  "_265": {
-    "type": "iron_ingot",
-    "id": 265,
-    "color": "#9c9ca4"
-  },
-  "_266": {
-    "type": "gold_ingot",
-    "id": 266,
-    "color": "#e0c474"
-  },
-  "_280": {
-    "type": "stick",
-    "id": 280,
-    "color": "#044404"
-  },
-  "_281": {
-    "type": "bowl",
-    "id": 281,
-    "color": "#2c6404"
-  },
-  "_282": {
-    "type": "mushroom_soup",
-    "id": 282,
-    "color": "#2c6404"
-  },
-  "_287": {
-    "type": "string",
-    "id": 287,
-    "color": "#e8e8e8"
-  },
-  "_288": {
-    "type": "feather",
-    "id": 288,
-    "color": "#0c7c14"
-  },
-  "_289": {
-    "type": "gun_powder",
-    "id": 289,
-    "color": "#f4dc54"
-  },
-  "_295": {
-    "type": "seeds",
-    "id": 295,
-    "color": "#644411"
-  },
-  "_296": {
-    "type": "wheat",
-    "id": 296,
-    "color": "#c1a648"
-  },
-  "_297": {
-    "type": "bread",
-    "id": 297,
-    "color": "#844214"
-  },
-  "_318": {
-    "type": "flint",
-    "id": 318,
-    "color": "#232318"
-  },
-  "_319": {
-    "type": "raw_porkchop",
-    "id": 319,
-    "color": "#6c4c24"
-  },
-  "_320": {
-    "type": "cooked_porkchop",
-    "id": 320,
-    "color": "#6c4c24"
-  },
-  "_321": {
-    "type": "paintings",
-    "id": 321,
-    "color": "#d0869b"
-  },
-  "_322": {
-    "type": "golden_apple",
-    "id": 322,
-    "color": "#e0c474"
-  },
-  "_323": {
-    "type": "sign",
-    "id": 323,
-    "color": "#4a2404"
-  },
-  "_324": {
-    "type": "wooden_door",
-    "id": 324,
-    "color": "#5e3205"
-  },
-  "_325": {
-    "type": "bucket",
-    "id": 325,
-    "color": "#401409"
-  },
-  "_326": {
-    "type": "water_bucket",
-    "id": 326,
-    "color": "#401409"
-  },
-  "_327": {
-    "type": "lava_bucket",
-    "id": 327,
-    "color": "#401409"
-  },
-  "_329": {
-    "type": "saddle",
-    "id": 329,
-    "color": "#d8d3b5"
-  },
-  "_330": {
-    "type": "iron_door",
-    "id": 330,
-    "color": "#28282f"
-  },
-  "_331": {
-    "type": "redstone_dust",
-    "id": 331,
-    "color": "#81806a"
-  },
-  "_332": {
-    "type": "snowball",
-    "id": 332,
-    "color": "#f4fcfc"
-  },
-  "_333": {
-    "type": "boat",
-    "id": 333,
-    "color": "#844214"
-  },
-  "_334": {
-    "type": "leather",
-    "id": 334,
-    "color": "#401409"
-  },
-  "_335": {
-    "type": "milk",
-    "id": 335,
-    "color": "#f4fcfc"
-  },
-  "_336": {
-    "type": "clay_brick",
-    "id": 336,
-    "color": "#90491e"
-  },
-  "_337": {
-    "type": "clay_balls",
-    "id": 337,
-    "color": "#90491e"
-  },
-  "_338": {
-    "type": "sugar_cane",
-    "id": 338,
-    "color": "#046404"
-  },
-  "_339": {
-    "type": "paper",
-    "id": 339,
-    "color": "#d0869b"
-  },
-  "_340": {
-    "type": "book",
-    "id": 340,
-    "color": "#642208"
-  },
-  "_341": {
-    "type": "slimeball",
-    "id": 341,
-    "color": "#31411c"
-  },
-  "_344": {
-    "type": "egg",
-    "id": 344,
-    "color": "#0b8c04"
-  },
-  "_346": {
-    "type": "fishing_rod",
-    "id": 346,
-    "color": "#9c9ca4"
-  },
-  "_348": {
-    "type": "glowstone_dust",
-    "id": 348,
-    "color": "#e5ad54"
-  },
-  "_349": {
-    "type": "raw_fish",
-    "id": 349,
-    "color": "#d0869b"
-  },
-  "_350": {
-    "type": "cooked_fish",
-    "id": 350,
-    "color": "#d0869b"
-  },
-  "_351": {
-    "type": "dyes",
-    "id": 351,
-    "color": "#d0869b"
-  },
-  "_352": {
-    "type": "bone",
-    "id": 352,
-    "color": "#f4fcfc"
-  },
-  "_353": {
-    "type": "sugar",
-    "id": 353,
-    "color": "#046404"
-  },
-  "_354": {
-    "type": "bed",
-    "id": 355,
-    "color": "#9c9c94",
-    "data": module.exports.bed
-  },
-  "_356": {
-    "type": "redstone_repeater",
-    "id": 356,
-    "color": "#d4bcb9"
-  },
-  "_357": {
-    "type": "cookie",
-    "id": 357,
-    "color": "#d0869b"
-  },
-  "_358": {
-    "type": "map",
-    "id": 358,
-    "color": "#338204"
-  },
-  "_359": {
-    "type": "shears",
-    "id": 359,
-    "color": "#d0869b"
-  },
-  "_360": {
-    "type": "melon_slice",
-    "id": 360,
-    "color": "#338204"
-  },
-  "_361": {
-    "type": "pumpkin_seeds",
-    "id": 361,
-    "color": "#c06c04"
-  },
-  "_362": {
-    "type": "melon_seeds",
-    "id": 362,
-    "color": "#4c54fc"
-  },
-  "_363": {
-    "type": "raw_beef",
-    "id": 363,
-    "color": "#d0869b"
-  },
-  "_364": {
-    "type": "steak",
-    "id": 364,
-    "color": "#d0869b"
-  },
-  "_365": {
-    "type": "raw_chicken",
-    "id": 365,
-    "color": "#d0869b"
-  },
-  "_366": {
-    "type": "cooked_chicken",
-    "id": 366,
-    "color": "#d0869b"
-  },
-  "_367": {
-    "type": "rotton_flesh",
-    "id": 367,
-    "color": "#d0869b"
-  },
-  "_368": {
-    "type": "ender_pearl",
-    "id": 368,
-    "color": "#cccca2"
-  },
-  "_369": {
-    "type": "blaze_rod",
-    "id": 369,
-    "color": "#6e562c"
-  },
-  "_370": {
-    "type": "ghast_tear",
-    "id": 370,
-    "color": "#cccca2"
-  },
-  "_374": {
-    "type": "glass_bottle",
-    "id": 374,
-    "color": "#5e7479"
-  },
-  "_375": {
-    "type": "spider_eye",
-    "id": 375,
-    "color": "#31411c"
-  },
-  "_376": {
-    "type": "fermented_spider_eye",
-    "id": 376,
-    "color": "#31411c"
-  },
-  "_377": {
-    "type": "blaze_powder",
-    "id": 377,
-    "color": "#ad4f24"
-  },
-  "_378": {
-    "type": "magma_cream",
-    "id": 378,
-    "color": "#ad4f24"
-  },
-  "_379": {
-    "type": "brewing_stand",
-    "id": 379,
-    "color": "#b48c3c"
-  },
-  "_380": {
-    "type": "cauldron",
-    "id": 380,
-    "color": "#232323"
-  },
-  "_381": {
-    "type": "eye_of_ender",
-    "id": 381,
-    "color": "#040c0c"
-  },
-  "_382": {
-    "type": "glistering_melon",
-    "id": 382,
-    "color": "#338204"
-  },
-  "_383": {
-    "type": "spawn_eggs",
-    "id": 383,
-    "color": "#0b8c04"
-  },
-  "_384": {
-    "type": "bottle_o_enchanting",
-    "id": 384,
-    "color": "#2c2c2c"
-  },
-  "_385": {
-    "type": "fire_charge",
-    "id": 385,
-    "color": "#fcac04"
-  },
-  "_388": {
-    "type": "emerald",
-    "id": 388,
-    "color": "#0b8c04"
-  },
-  "_390": {
-    "type": "flower_pot",
-    "id": 390,
-    "color": "#8c8c64"
-  },
-  "_391": {
-    "type": "carrot",
-    "id": 391,
-    "color": "#044c04"
-  },
-  "_392": {
-    "type": "unknown",
-    "id": 392,
-    "color": "#04520f"
-  },
-  "_393": {
-    "type": "baked_potato",
-    "id": 393,
-    "color": "#5c7074"
-  },
-  "_394": {
-    "type": "poisonous_potato",
-    "id": 394,
-    "color": "#5c7074"
-  },
-  "_395": {
-    "type": "map",
-    "id": 395,
-    "color": "#338204"
-  },
-  "_396": {
-    "type": "golden_carrot",
-    "id": 396,
-    "color": "#5c7074"
-  },
-  "_397": {
-    "type": "mob_head",
-    "id": 397,
-    "color": "#1c1c1c"
-  },
-  "_399": {
-    "type": "nether_star",
-    "id": 399,
-    "color": "#82442a"
-  },
-  "_400": {
-    "type": "pumkpin_pie",
-    "id": 400,
-    "color": "#c06c04"
-  },
-  "_401": {
-    "type": "firework_rocket",
-    "id": 401,
-    "color": "#556804"
-  },
-  "_402": {
-    "type": "firework_star",
-    "id": 402,
-    "color": "#fcac04"
+    if (op.type === 'del') {
+      op.type = 'remove'
+    }
   }
+
+  return this.idb.batch(array, function(){ callback() }, callback)
 }
-},{}],40:[function(require,module,exports){
+
+Level.prototype._close = function (callback) {
+  this.idb.db.close()
+  callback()
+}
+
+Level.prototype._approximateSize = function() {
+  throw new Error('Not implemented')
+}
+
+Level.prototype._isBuffer = isBuffer
+
+var checkKeyValue = Level.prototype._checkKeyValue = function (obj, type) {
+  if (obj === null || obj === undefined)
+    return new Error(type + ' cannot be `null` or `undefined`')
+  if (obj === null || obj === undefined)
+    return new Error(type + ' cannot be `null` or `undefined`')
+  if (isBuffer(obj) && obj.byteLength === 0)
+    return new Error(type + ' cannot be an empty ArrayBuffer')
+  if (String(obj) === '')
+    return new Error(type + ' cannot be an empty String')
+  if (obj.length === 0)
+    return new Error(type + ' cannot be an empty Array')
+}
+
+function ArrayBufferToString(buf) {
+  return String.fromCharCode.apply(null, new Uint16Array(buf))
+}
+
+function StringToArrayBuffer(str) {
+  var buf = new ArrayBuffer(str.length * 2) // 2 bytes for each char
+  var bufView = new Uint16Array(buf)
+  for (var i = 0, strLen = str.length; i < strLen; i++) {
+    bufView[i] = str.charCodeAt(i)
+  }
+  return buf
+}
+
+},{"./iterator":25,"abstract-leveldown":28,"idb-wrapper":29,"isbuffer":30,"util":5}],25:[function(require,module,exports){
+var util = require('util')
+var AbstractIterator  = require('abstract-leveldown').AbstractIterator
+module.exports = Iterator
+
+function Iterator (db, options) {
+  if (!options) options = {}
+  this.options = options
+  AbstractIterator.call(this, db)
+  this._order = !!options.reverse ? 'DESC': 'ASC'
+  this._start = options.start
+  this._limit = options.limit
+  if (this._limit) this._count = 0
+  this._end   = options.end
+  this._done = false
+}
+
+util.inherits(Iterator, AbstractIterator)
+
+Iterator.prototype.createIterator = function() {
+  var lower, upper
+  var onlyStart = typeof this._start !== 'undefined' && typeof this._end === 'undefined'
+  var onlyEnd = typeof this._start === 'undefined' && typeof this._end !== 'undefined'
+  var startAndEnd = typeof this._start !== 'undefined' && typeof this._end !== 'undefined'
+  if (onlyStart) {
+    var index = this._start
+    if (this._order === 'ASC') {
+      lower = index
+    } else {
+      upper = index
+    }
+  } else if (onlyEnd) {
+    var index = this._end
+    if (this._order === 'DESC') {
+      lower = index
+    } else {
+      upper = index
+    }
+  } else if (startAndEnd) {
+    lower = this._start
+    upper = this._end
+    if (this._start > this._end) {
+      lower = this._end
+      upper = this._start
+    }
+  }
+  if (lower || upper) {
+    this._keyRange = this.options.keyRange || this.db.makeKeyRange({
+      lower: lower,
+      upper: upper
+      // TODO expose excludeUpper/excludeLower
+    })
+  }
+  this.iterator = this.db.iterate(this.onItem.bind(this), {
+    keyRange: this._keyRange,
+    autoContinue: false,
+    order: this._order,
+    onError: function(err) { console.log('horrible error', err) },
+  })
+}
+
+// TODO the limit implementation here just ignores all reads after limit has been reached
+// it should cancel the iterator instead but I don't know how
+Iterator.prototype.onItem = function (value, cursor, cursorTransaction) {
+  if (!cursor && this.callback) {
+    this.callback()
+    this.callback = false
+    return
+  }
+  if (this._limit && this._limit > 0) {
+    if (this._limit > this._count) this.callback(false, cursor.key, cursor.value)
+  } else {
+    this.callback(false, cursor.key, cursor.value)
+  }
+  if (this._limit) this._count++
+  if (cursor) cursor.continue()
+}
+
+Iterator.prototype._next = function (callback) {
+  if (!callback) return new Error('next() requires a callback argument')
+  if (!this._started) {
+    this.createIterator()
+    this._started = true
+  }
+  this.callback = callback
+}
+},{"abstract-leveldown":28,"util":5}],26:[function(require,module,exports){
 (function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
 
 function AbstractChainedBatch (db) {
   this._db         = db
   this._operations = []
+  this._written    = false
+}
+
+AbstractChainedBatch.prototype._checkWritten = function () {
+  if (this._written)
+    throw new Error('write() already called on this batch')
 }
 
 AbstractChainedBatch.prototype.put = function (key, value) {
+  this._checkWritten()
+
   var err = this._db._checkKeyValue(key, 'key', this._db._isBuffer)
   if (err) throw err
   err = this._db._checkKeyValue(value, 'value', this._db._isBuffer)
@@ -12327,6 +10535,8 @@ AbstractChainedBatch.prototype.put = function (key, value) {
 }
 
 AbstractChainedBatch.prototype.del = function (key) {
+  this._checkWritten()
+
   var err = this._db._checkKeyValue(key, 'key', this._db._isBuffer)
   if (err) throw err
 
@@ -12338,17 +10548,23 @@ AbstractChainedBatch.prototype.del = function (key) {
 }
 
 AbstractChainedBatch.prototype.clear = function () {
+  this._checkWritten()
+
   this._operations = []
   return this
 }
 
 AbstractChainedBatch.prototype.write = function (options, callback) {
+  this._checkWritten()
+
   if (typeof options == 'function')
     callback = options
   if (typeof callback != 'function')
     throw new Error('write() requires a callback argument')
   if (typeof options != 'object')
     options = {}
+
+  this._written = true
 
   if (typeof this._db._batch == 'function')
     return this._db._batch(this._operations, options, callback)
@@ -12358,7 +10574,7 @@ AbstractChainedBatch.prototype.write = function (options, callback) {
 
 module.exports = AbstractChainedBatch
 })(require("__browserify_process"))
-},{"__browserify_process":11}],41:[function(require,module,exports){
+},{"__browserify_process":11}],27:[function(require,module,exports){
 (function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
 
 function AbstractIterator (db) {
@@ -12368,26 +10584,28 @@ function AbstractIterator (db) {
 }
 
 AbstractIterator.prototype.next = function (callback) {
+  var self = this
+
   if (typeof callback != 'function')
     throw new Error('next() requires a callback argument')
 
-  if (this._ended)
+  if (self._ended)
     return callback(new Error('cannot call next() after end()'))
-  if (this._nexting)
+  if (self._nexting)
     return callback(new Error('cannot call next() before previous next() has completed'))
 
-  this._nexting = true
-  if (typeof this._next == 'function') {
-    return this._next(function () {
-      this._nexting = false
+  self._nexting = true
+  if (typeof self._next == 'function') {
+    return self._next(function () {
+      self._nexting = false
       callback.apply(null, arguments)
-    }.bind(this))
+    })
   }
 
   process.nextTick(function () {
-    this._nexting = false
+    self._nexting = false
     callback()
-  }.bind(this))
+  })
 }
 
 AbstractIterator.prototype.end = function (callback) {
@@ -12408,7 +10626,7 @@ AbstractIterator.prototype.end = function (callback) {
 module.exports = AbstractIterator
 
 })(require("__browserify_process"))
-},{"__browserify_process":11}],42:[function(require,module,exports){
+},{"__browserify_process":11}],28:[function(require,module,exports){
 (function(process,Buffer){/* Copyright (c) 2013 Rod Vagg, MIT License */
 
 var AbstractIterator     = require('./abstract-iterator')
@@ -12449,20 +10667,21 @@ AbstractLevelDOWN.prototype.close = function (callback) {
 }
 
 AbstractLevelDOWN.prototype.get = function (key, options, callback) {
+  var self = this
   if (typeof options == 'function')
     callback = options
   if (typeof callback != 'function')
     throw new Error('get() requires a callback argument')
-  var err = this._checkKeyValue(key, 'key', this._isBuffer)
+  var err = self._checkKeyValue(key, 'key', self._isBuffer)
   if (err) return callback(err)
-  if (!this._isBuffer(key)) key = String(key)
+  if (!self._isBuffer(key)) key = String(key)
   if (typeof options != 'object')
     options = {}
 
-  if (typeof this._get == 'function')
-    return this._get(key, options, callback)
+  if (typeof self._get == 'function')
+    return self._get(key, options, callback)
 
-  process.nextTick(callback.bind(null, new Error('NotFound')))
+  process.nextTick(function () { callback(new Error('NotFound')) })
 }
 
 AbstractLevelDOWN.prototype.put = function (key, value, options, callback) {
@@ -12555,7 +10774,7 @@ AbstractLevelDOWN.prototype.approximateSize = function (start, end, callback) {
   if (typeof this._approximateSize == 'function')
     return this._approximateSize(start, end, callback)
 
-  process.nextTick(callback.bind(null, null, 0))
+  process.nextTick(function () { callback(null, 0) })
 }
 
 AbstractLevelDOWN.prototype.iterator = function (options) {
@@ -12590,597 +10809,9 @@ AbstractLevelDOWN.prototype._checkKeyValue = function (obj, type) {
 
 module.exports.AbstractLevelDOWN = AbstractLevelDOWN
 module.exports.AbstractIterator  = AbstractIterator
+
 })(require("__browserify_process"),require("__browserify_Buffer").Buffer)
-},{"./abstract-chained-batch":40,"./abstract-iterator":41,"__browserify_Buffer":10,"__browserify_process":11}],43:[function(require,module,exports){
-var proto = {}
-module.exports = proto
-
-proto.from = require('./from.js')
-proto.to = require('./to.js')
-proto.is = require('./is.js')
-proto.subarray = require('./subarray.js')
-proto.join = require('./join.js')
-proto.copy = require('./copy.js')
-proto.create = require('./create.js')
-
-mix(require('./read.js'), proto)
-mix(require('./write.js'), proto)
-
-function mix(from, into) {
-  for(var key in from) {
-    into[key] = from[key]
-  }
-}
-
-},{"./copy.js":46,"./create.js":47,"./from.js":48,"./is.js":49,"./join.js":50,"./read.js":52,"./subarray.js":53,"./to.js":54,"./write.js":55}],44:[function(require,module,exports){
-(function (exports) {
-	'use strict';
-
-	var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-	function b64ToByteArray(b64) {
-		var i, j, l, tmp, placeHolders, arr;
-	
-		if (b64.length % 4 > 0) {
-			throw 'Invalid string. Length must be a multiple of 4';
-		}
-
-		// the number of equal signs (place holders)
-		// if there are two placeholders, than the two characters before it
-		// represent one byte
-		// if there is only one, then the three characters before it represent 2 bytes
-		// this is just a cheap hack to not do indexOf twice
-		placeHolders = b64.indexOf('=');
-		placeHolders = placeHolders > 0 ? b64.length - placeHolders : 0;
-
-		// base64 is 4/3 + up to two characters of the original data
-		arr = [];//new Uint8Array(b64.length * 3 / 4 - placeHolders);
-
-		// if there are placeholders, only get up to the last complete 4 chars
-		l = placeHolders > 0 ? b64.length - 4 : b64.length;
-
-		for (i = 0, j = 0; i < l; i += 4, j += 3) {
-			tmp = (lookup.indexOf(b64[i]) << 18) | (lookup.indexOf(b64[i + 1]) << 12) | (lookup.indexOf(b64[i + 2]) << 6) | lookup.indexOf(b64[i + 3]);
-			arr.push((tmp & 0xFF0000) >> 16);
-			arr.push((tmp & 0xFF00) >> 8);
-			arr.push(tmp & 0xFF);
-		}
-
-		if (placeHolders === 2) {
-			tmp = (lookup.indexOf(b64[i]) << 2) | (lookup.indexOf(b64[i + 1]) >> 4);
-			arr.push(tmp & 0xFF);
-		} else if (placeHolders === 1) {
-			tmp = (lookup.indexOf(b64[i]) << 10) | (lookup.indexOf(b64[i + 1]) << 4) | (lookup.indexOf(b64[i + 2]) >> 2);
-			arr.push((tmp >> 8) & 0xFF);
-			arr.push(tmp & 0xFF);
-		}
-
-		return arr;
-	}
-
-	function uint8ToBase64(uint8) {
-		var i,
-			extraBytes = uint8.length % 3, // if we have 1 byte left, pad 2 bytes
-			output = "",
-			temp, length;
-
-		function tripletToBase64 (num) {
-			return lookup[num >> 18 & 0x3F] + lookup[num >> 12 & 0x3F] + lookup[num >> 6 & 0x3F] + lookup[num & 0x3F];
-		};
-
-		// go through the array every three bytes, we'll deal with trailing stuff later
-		for (i = 0, length = uint8.length - extraBytes; i < length; i += 3) {
-			temp = (uint8[i] << 16) + (uint8[i + 1] << 8) + (uint8[i + 2]);
-			output += tripletToBase64(temp);
-		}
-
-		// pad the end with zeros, but make sure to not forget the extra bytes
-		switch (extraBytes) {
-			case 1:
-				temp = uint8[uint8.length - 1];
-				output += lookup[temp >> 2];
-				output += lookup[(temp << 4) & 0x3F];
-				output += '==';
-				break;
-			case 2:
-				temp = (uint8[uint8.length - 2] << 8) + (uint8[uint8.length - 1]);
-				output += lookup[temp >> 10];
-				output += lookup[(temp >> 4) & 0x3F];
-				output += lookup[(temp << 2) & 0x3F];
-				output += '=';
-				break;
-		}
-
-		return output;
-	}
-
-	module.exports.toByteArray = b64ToByteArray;
-	module.exports.fromByteArray = uint8ToBase64;
-}());
-
-},{}],45:[function(require,module,exports){
-module.exports = to_utf8
-
-var out = []
-  , col = []
-  , fcc = String.fromCharCode
-  , mask = [0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]
-  , unmask = [
-      0x00
-    , 0x01
-    , 0x02 | 0x01
-    , 0x04 | 0x02 | 0x01
-    , 0x08 | 0x04 | 0x02 | 0x01
-    , 0x10 | 0x08 | 0x04 | 0x02 | 0x01
-    , 0x20 | 0x10 | 0x08 | 0x04 | 0x02 | 0x01
-    , 0x40 | 0x20 | 0x10 | 0x08 | 0x04 | 0x02 | 0x01
-  ]
-
-function to_utf8(bytes, start, end) {
-  start = start === undefined ? 0 : start
-  end = end === undefined ? bytes.length : end
-
-  var idx = 0
-    , hi = 0x80
-    , collecting = 0
-    , pos
-    , by
-
-  col.length =
-  out.length = 0
-
-  while(idx < bytes.length) {
-    by = bytes[idx]
-    if(!collecting && by & hi) {
-      pos = find_pad_position(by)
-      collecting += pos
-      if(pos < 8) {
-        col[col.length] = by & unmask[6 - pos]
-      }
-    } else if(collecting) {
-      col[col.length] = by & unmask[6]
-      --collecting
-      if(!collecting && col.length) {
-        out[out.length] = fcc(reduced(col, pos))
-        col.length = 0
-      }
-    } else { 
-      out[out.length] = fcc(by)
-    }
-    ++idx
-  }
-  if(col.length && !collecting) {
-    out[out.length] = fcc(reduced(col, pos))
-    col.length = 0
-  }
-  return out.join('')
-}
-
-function find_pad_position(byt) {
-  for(var i = 0; i < 7; ++i) {
-    if(!(byt & mask[i])) {
-      break
-    }
-  }
-  return i
-}
-
-function reduced(list) {
-  var out = 0
-  for(var i = 0, len = list.length; i < len; ++i) {
-    out |= list[i] << ((len - i - 1) * 6)
-  }
-  return out
-}
-
-},{}],46:[function(require,module,exports){
-module.exports = copy
-
-var slice = [].slice
-
-function copy(source, target, target_start, source_start, source_end) {
-  target_start = arguments.length < 3 ? 0 : target_start
-  source_start = arguments.length < 4 ? 0 : source_start
-  source_end = arguments.length < 5 ? source.length : source_end
-
-  if(source_end === source_start) {
-    return
-  }
-
-  if(target.length === 0 || source.length === 0) {
-    return
-  }
-
-  if(source_end > source.length) {
-    source_end = source.length
-  }
-
-  if(target.length - target_start < source_end - source_start) {
-    source_end = target.length - target_start + start
-  }
-
-  if(source.buffer !== target.buffer) {
-    return fast_copy(source, target, target_start, source_start, source_end)
-  }
-  return slow_copy(source, target, target_start, source_start, source_end)
-}
-
-function fast_copy(source, target, target_start, source_start, source_end) {
-  var len = (source_end - source_start) + target_start
-
-  for(var i = target_start, j = source_start;
-      i < len;
-      ++i,
-      ++j) {
-    target[i] = source[j]
-  }
-}
-
-function slow_copy(from, to, j, i, jend) {
-  // the buffers could overlap.
-  var iend = jend + i
-    , tmp = new Uint8Array(slice.call(from, i, iend))
-    , x = 0
-
-  for(; i < iend; ++i, ++x) {
-    to[j++] = tmp[x]
-  }
-}
-
-},{}],47:[function(require,module,exports){
-module.exports = function(size) {
-  return new Uint8Array(size)
-}
-
-},{}],48:[function(require,module,exports){
-module.exports = from
-
-var base64 = require('base64-js')
-
-var decoders = {
-    hex: from_hex
-  , utf8: from_utf
-  , base64: from_base64
-}
-
-function from(source, encoding) {
-  if(Array.isArray(source)) {
-    return new Uint8Array(source)
-  }
-
-  return decoders[encoding || 'utf8'](source)
-}
-
-function from_hex(str) {
-  var size = str.length / 2
-    , buf = new Uint8Array(size)
-    , character = ''
-
-  for(var i = 0, len = str.length; i < len; ++i) {
-    character += str.charAt(i)
-
-    if(i > 0 && (i % 2) === 1) {
-      buf[i>>>1] = parseInt(character, 16)
-      character = '' 
-    }
-  }
-
-  return buf 
-}
-
-function from_utf(str) {
-  var bytes = []
-    , tmp
-    , ch
-
-  for(var i = 0, len = str.length; i < len; ++i) {
-    ch = str.charCodeAt(i)
-    if(ch & 0x80) {
-      tmp = encodeURIComponent(str.charAt(i)).substr(1).split('%')
-      for(var j = 0, jlen = tmp.length; j < jlen; ++j) {
-        bytes[bytes.length] = parseInt(tmp[j], 16)
-      }
-    } else {
-      bytes[bytes.length] = ch 
-    }
-  }
-
-  return new Uint8Array(bytes)
-}
-
-function from_base64(str) {
-  return new Uint8Array(base64.toByteArray(str)) 
-}
-
-},{"base64-js":44}],49:[function(require,module,exports){
-
-module.exports = function(buffer) {
-  return buffer instanceof Uint8Array;
-}
-
-},{}],50:[function(require,module,exports){
-module.exports = join
-
-function join(targets, hint) {
-  if(!targets.length) {
-    return new Uint8Array(0)
-  }
-
-  var len = hint !== undefined ? hint : get_length(targets)
-    , out = new Uint8Array(len)
-    , cur = targets[0]
-    , curlen = cur.length
-    , curidx = 0
-    , curoff = 0
-    , i = 0
-
-  while(i < len) {
-    if(curoff === curlen) {
-      curoff = 0
-      ++curidx
-      cur = targets[curidx]
-      curlen = cur && cur.length
-      continue
-    }
-    out[i++] = cur[curoff++] 
-  }
-
-  return out
-}
-
-function get_length(targets) {
-  var size = 0
-  for(var i = 0, len = targets.length; i < len; ++i) {
-    size += targets[i].byteLength
-  }
-  return size
-}
-
-},{}],51:[function(require,module,exports){
-var proto
-  , map
-
-module.exports = proto = {}
-
-map = typeof WeakMap === 'undefined' ? null : new WeakMap
-
-proto.get = !map ? no_weakmap_get : get
-
-function no_weakmap_get(target) {
-  return new DataView(target.buffer, 0)
-}
-
-function get(target) {
-  var out = map.get(target.buffer)
-  if(!out) {
-    map.set(target.buffer, out = new DataView(target.buffer, 0))
-  }
-  return out
-}
-
-},{}],52:[function(require,module,exports){
-module.exports = {
-    readUInt8:      read_uint8
-  , readInt8:       read_int8
-  , readUInt16LE:   read_uint16_le
-  , readUInt32LE:   read_uint32_le
-  , readInt16LE:    read_int16_le
-  , readInt32LE:    read_int32_le
-  , readFloatLE:    read_float_le
-  , readDoubleLE:   read_double_le
-  , readUInt16BE:   read_uint16_be
-  , readUInt32BE:   read_uint32_be
-  , readInt16BE:    read_int16_be
-  , readInt32BE:    read_int32_be
-  , readFloatBE:    read_float_be
-  , readDoubleBE:   read_double_be
-}
-
-var map = require('./mapped.js')
-
-function read_uint8(target, at) {
-  return target[at]
-}
-
-function read_int8(target, at) {
-  var v = target[at];
-  return v < 0x80 ? v : v - 0x100
-}
-
-function read_uint16_le(target, at) {
-  var dv = map.get(target);
-  return dv.getUint16(at + target.byteOffset, true)
-}
-
-function read_uint32_le(target, at) {
-  var dv = map.get(target);
-  return dv.getUint32(at + target.byteOffset, true)
-}
-
-function read_int16_le(target, at) {
-  var dv = map.get(target);
-  return dv.getInt16(at + target.byteOffset, true)
-}
-
-function read_int32_le(target, at) {
-  var dv = map.get(target);
-  return dv.getInt32(at + target.byteOffset, true)
-}
-
-function read_float_le(target, at) {
-  var dv = map.get(target);
-  return dv.getFloat32(at + target.byteOffset, true)
-}
-
-function read_double_le(target, at) {
-  var dv = map.get(target);
-  return dv.getFloat64(at + target.byteOffset, true)
-}
-
-function read_uint16_be(target, at) {
-  var dv = map.get(target);
-  return dv.getUint16(at + target.byteOffset, false)
-}
-
-function read_uint32_be(target, at) {
-  var dv = map.get(target);
-  return dv.getUint32(at + target.byteOffset, false)
-}
-
-function read_int16_be(target, at) {
-  var dv = map.get(target);
-  return dv.getInt16(at + target.byteOffset, false)
-}
-
-function read_int32_be(target, at) {
-  var dv = map.get(target);
-  return dv.getInt32(at + target.byteOffset, false)
-}
-
-function read_float_be(target, at) {
-  var dv = map.get(target);
-  return dv.getFloat32(at + target.byteOffset, false)
-}
-
-function read_double_be(target, at) {
-  var dv = map.get(target);
-  return dv.getFloat64(at + target.byteOffset, false)
-}
-
-},{"./mapped.js":51}],53:[function(require,module,exports){
-module.exports = subarray
-
-function subarray(buf, from, to) {
-  return buf.subarray(from || 0, to || buf.length)
-}
-
-},{}],54:[function(require,module,exports){
-module.exports = to
-
-var base64 = require('base64-js')
-  , toutf8 = require('to-utf8')
-
-var encoders = {
-    hex: to_hex
-  , utf8: to_utf
-  , base64: to_base64
-}
-
-function to(buf, encoding) {
-  return encoders[encoding || 'utf8'](buf)
-}
-
-function to_hex(buf) {
-  var str = ''
-    , byt
-
-  for(var i = 0, len = buf.length; i < len; ++i) {
-    byt = buf[i]
-    str += ((byt & 0xF0) >>> 4).toString(16)
-    str += (byt & 0x0F).toString(16)
-  }
-
-  return str
-}
-
-function to_utf(buf) {
-  return toutf8(buf)
-}
-
-function to_base64(buf) {
-  return base64.fromByteArray(buf)
-}
-
-
-},{"base64-js":44,"to-utf8":45}],55:[function(require,module,exports){
-module.exports = {
-    writeUInt8:      write_uint8
-  , writeInt8:       write_int8
-  , writeUInt16LE:   write_uint16_le
-  , writeUInt32LE:   write_uint32_le
-  , writeInt16LE:    write_int16_le
-  , writeInt32LE:    write_int32_le
-  , writeFloatLE:    write_float_le
-  , writeDoubleLE:   write_double_le
-  , writeUInt16BE:   write_uint16_be
-  , writeUInt32BE:   write_uint32_be
-  , writeInt16BE:    write_int16_be
-  , writeInt32BE:    write_int32_be
-  , writeFloatBE:    write_float_be
-  , writeDoubleBE:   write_double_be
-}
-
-var map = require('./mapped.js')
-
-function write_uint8(target, value, at) {
-  return target[at] = value
-}
-
-function write_int8(target, value, at) {
-  return target[at] = value < 0 ? value + 0x100 : value
-}
-
-function write_uint16_le(target, value, at) {
-  var dv = map.get(target);
-  return dv.setUint16(at + target.byteOffset, value, true)
-}
-
-function write_uint32_le(target, value, at) {
-  var dv = map.get(target);
-  return dv.setUint32(at + target.byteOffset, value, true)
-}
-
-function write_int16_le(target, value, at) {
-  var dv = map.get(target);
-  return dv.setInt16(at + target.byteOffset, value, true)
-}
-
-function write_int32_le(target, value, at) {
-  var dv = map.get(target);
-  return dv.setInt32(at + target.byteOffset, value, true)
-}
-
-function write_float_le(target, value, at) {
-  var dv = map.get(target);
-  return dv.setFloat32(at + target.byteOffset, value, true)
-}
-
-function write_double_le(target, value, at) {
-  var dv = map.get(target);
-  return dv.setFloat64(at + target.byteOffset, value, true)
-}
-
-function write_uint16_be(target, value, at) {
-  var dv = map.get(target);
-  return dv.setUint16(at + target.byteOffset, value, false)
-}
-
-function write_uint32_be(target, value, at) {
-  var dv = map.get(target);
-  return dv.setUint32(at + target.byteOffset, value, false)
-}
-
-function write_int16_be(target, value, at) {
-  var dv = map.get(target);
-  return dv.setInt16(at + target.byteOffset, value, false)
-}
-
-function write_int32_be(target, value, at) {
-  var dv = map.get(target);
-  return dv.setInt32(at + target.byteOffset, value, false)
-}
-
-function write_float_be(target, value, at) {
-  var dv = map.get(target);
-  return dv.setFloat32(at + target.byteOffset, value, false)
-}
-
-function write_double_be(target, value, at) {
-  var dv = map.get(target);
-  return dv.setFloat64(at + target.byteOffset, value, false)
-}
-
-},{"./mapped.js":51}],56:[function(require,module,exports){
+},{"./abstract-chained-batch":26,"./abstract-iterator":27,"__browserify_Buffer":10,"__browserify_process":11}],29:[function(require,module,exports){
 (function(){/*jshint expr:true */
 /*global window:false, console:false, define:false, module:false */
 
@@ -14170,7 +11801,2185 @@ function write_double_be(target, value, at) {
 }, this);
 
 })()
-},{}],57:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
+(function(){var Buffer = require('buffer').Buffer;
+
+module.exports = isBuffer;
+
+function isBuffer (o) {
+  return Buffer.isBuffer(o)
+    || /\[object (.+Array|Array.+)\]/.test(Object.prototype.toString.call(o));
+}
+
+})()
+},{"buffer":7}],31:[function(require,module,exports){
+var bits = require("bit-twiddle")
+
+function size(chunk) {
+  var count = 0
+  var chunk_len = chunk.length
+  var i = 0, v, l
+  while(i<chunk.length) {
+    v = chunk[i]
+    l = 0
+    while(i < chunk_len && chunk[i] === v) {
+      ++i
+      ++l
+    }
+    count += (bits.log2(l) / 7)|0
+    count += (bits.log2(v>>>0) / 7)|0
+    count += 2
+  }
+  return count
+}
+exports.size = size
+
+function encode(chunk, runs) {
+  if(!runs) {
+    runs = new Uint8Array(size(chunk))
+  }
+  var rptr = 0, nruns = runs.length
+  var i = 0, v, l
+  while(i<chunk.length) {
+    v = chunk[i]
+    l = 0
+    while(i < chunk.length && chunk[i] === v) {
+      ++i
+      ++l
+    }
+    while(rptr < nruns && l >= 128) {
+      runs[rptr++] = 128 + (l&0x7f)
+      l >>>= 7
+    }
+    if(rptr >= nruns) {
+      throw new Error("RLE buffer overflow")
+    }
+    runs[rptr++] = l
+    v >>>= 0
+    while(rptr < nruns && v >= 128) {
+      runs[rptr++] = 128 + (v&0x7f)
+      v >>>= 7
+    }
+    if(rptr >= nruns) {
+      throw new Error("RLE buffer overflow")
+    }
+    runs[rptr++] = v
+  }
+  return runs
+}
+exports.encode = encode
+
+function decode(runs, chunk) {
+  var buf_len = chunk.length
+  var nruns = runs.length
+  var cptr = 0
+  var ptr = 0
+  var l, s, v, i
+  while(ptr < nruns) {
+    l = 0
+    s = 0
+    while(ptr < nruns && runs[ptr] >= 128) {
+      l += (runs[ptr++]&0x7f) << s
+      s += 7
+    }
+    l += runs[ptr++] << s
+    if(ptr >= nruns) {
+      throw new Error("RLE buffer underrun")
+    }
+    if(cptr + l > buf_len) {
+      throw new Error("Chunk buffer overflow")
+    }
+    v = 0
+    s = 0
+    while(ptr < nruns && runs[ptr] >= 128) {
+      v += (runs[ptr++]&0x7f) << s
+      s += 7
+    }
+    if(ptr >= nruns) {
+      throw new Error("RLE buffer underrun")
+    }
+    v += runs[ptr++] << s
+    for(i=0; i<l; ++i) {
+      chunk[cptr++] = v
+    }
+  }
+  return chunk
+}
+exports.decode = decode
+
+},{"bit-twiddle":32}],32:[function(require,module,exports){
+/**
+ * Bit twiddling hacks for JavaScript.
+ *
+ * Author: Mikola Lysenko
+ *
+ * Ported from Stanford bit twiddling hack library:
+ *    http://graphics.stanford.edu/~seander/bithacks.html
+ */
+
+"use strict"; "use restrict";
+
+//Number of bits in an integer
+var INT_BITS = 32;
+
+//Constants
+exports.INT_BITS  = INT_BITS;
+exports.INT_MAX   =  0x7fffffff;
+exports.INT_MIN   = -1<<(INT_BITS-1);
+
+//Returns -1, 0, +1 depending on sign of x
+exports.sign = function(v) {
+  return (v > 0) - (v < 0);
+}
+
+//Computes absolute value of integer
+exports.abs = function(v) {
+  var mask = v >> (INT_BITS-1);
+  return (v ^ mask) - mask;
+}
+
+//Computes minimum of integers x and y
+exports.min = function(x, y) {
+  return y ^ ((x ^ y) & -(x < y));
+}
+
+//Computes maximum of integers x and y
+exports.max = function(x, y) {
+  return x ^ ((x ^ y) & -(x < y));
+}
+
+//Checks if a number is a power of two
+exports.isPow2 = function(v) {
+  return !(v & (v-1)) && (!!v);
+}
+
+//Computes log base 2 of v
+exports.log2 = function(v) {
+  var r, shift;
+  r =     (v > 0xFFFF) << 4; v >>>= r;
+  shift = (v > 0xFF  ) << 3; v >>>= shift; r |= shift;
+  shift = (v > 0xF   ) << 2; v >>>= shift; r |= shift;
+  shift = (v > 0x3   ) << 1; v >>>= shift; r |= shift;
+  return r | (v >> 1);
+}
+
+//Computes log base 10 of v
+exports.log10 = function(v) {
+  return  (v >= 1000000000) ? 9 : (v >= 100000000) ? 8 : (v >= 10000000) ? 7 :
+          (v >= 1000000) ? 6 : (v >= 100000) ? 5 : (v >= 10000) ? 4 :
+          (v >= 1000) ? 3 : (v >= 100) ? 2 : (v >= 10) ? 1 : 0;
+}
+
+//Counts number of bits
+exports.popCount = function(v) {
+  v = v - ((v >>> 1) & 0x55555555);
+  v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+  return ((v + (v >>> 4) & 0xF0F0F0F) * 0x1010101) >>> 24;
+}
+
+//Counts number of trailing zeros
+function countTrailingZeros(v) {
+  var c = 32;
+  v &= -v;
+  if (v) c--;
+  if (v & 0x0000FFFF) c -= 16;
+  if (v & 0x00FF00FF) c -= 8;
+  if (v & 0x0F0F0F0F) c -= 4;
+  if (v & 0x33333333) c -= 2;
+  if (v & 0x55555555) c -= 1;
+  return c;
+}
+exports.countTrailingZeros = countTrailingZeros;
+
+//Rounds to next power of 2
+exports.nextPow2 = function(v) {
+  v += v === 0;
+  --v;
+  v |= v >>> 1;
+  v |= v >>> 2;
+  v |= v >>> 4;
+  v |= v >>> 8;
+  v |= v >>> 16;
+  return v + 1;
+}
+
+//Rounds down to previous power of 2
+exports.prevPow2 = function(v) {
+  v |= v >>> 1;
+  v |= v >>> 2;
+  v |= v >>> 4;
+  v |= v >>> 8;
+  v |= v >>> 16;
+  return v - (v>>>1);
+}
+
+//Computes parity of word
+exports.parity = function(v) {
+  v ^= v >>> 16;
+  v ^= v >>> 8;
+  v ^= v >>> 4;
+  v &= 0xf;
+  return (0x6996 >>> v) & 1;
+}
+
+var REVERSE_TABLE = new Array(256);
+
+(function(tab) {
+  for(var i=0; i<256; ++i) {
+    var v = i, r = i, s = 7;
+    for (v >>>= 1; v; v >>>= 1) {
+      r <<= 1;
+      r |= v & 1;
+      --s;
+    }
+    tab[i] = (r << s) & 0xff;
+  }
+})(REVERSE_TABLE);
+
+//Reverse bits in a 32 bit word
+exports.reverse = function(v) {
+  return  (REVERSE_TABLE[ v         & 0xff] << 24) |
+          (REVERSE_TABLE[(v >>> 8)  & 0xff] << 16) |
+          (REVERSE_TABLE[(v >>> 16) & 0xff] << 8)  |
+           REVERSE_TABLE[(v >>> 24) & 0xff];
+}
+
+//Interleave bits of 2 coordinates with 16 bits.  Useful for fast quadtree codes
+exports.interleave2 = function(x, y) {
+  x &= 0xFFFF;
+  x = (x | (x << 8)) & 0x00FF00FF;
+  x = (x | (x << 4)) & 0x0F0F0F0F;
+  x = (x | (x << 2)) & 0x33333333;
+  x = (x | (x << 1)) & 0x55555555;
+
+  y &= 0xFFFF;
+  y = (y | (y << 8)) & 0x00FF00FF;
+  y = (y | (y << 4)) & 0x0F0F0F0F;
+  y = (y | (y << 2)) & 0x33333333;
+  y = (y | (y << 1)) & 0x55555555;
+
+  return x | (y << 1);
+}
+
+//Extracts the nth interleaved component
+exports.deinterleave2 = function(v, n) {
+  v = (v >>> n) & 0x55555555;
+  v = (v | (v >>> 1))  & 0x33333333;
+  v = (v | (v >>> 2))  & 0x0F0F0F0F;
+  v = (v | (v >>> 4))  & 0x00FF00FF;
+  v = (v | (v >>> 16)) & 0x000FFFF;
+  return (v << 16) >> 16;
+}
+
+
+//Interleave bits of 3 coordinates, each with 10 bits.  Useful for fast octree codes
+exports.interleave3 = function(x, y, z) {
+  x &= 0x3FF;
+  x  = (x | (x<<16)) & 4278190335;
+  x  = (x | (x<<8))  & 251719695;
+  x  = (x | (x<<4))  & 3272356035;
+  x  = (x | (x<<2))  & 1227133513;
+
+  y &= 0x3FF;
+  y  = (y | (y<<16)) & 4278190335;
+  y  = (y | (y<<8))  & 251719695;
+  y  = (y | (y<<4))  & 3272356035;
+  y  = (y | (y<<2))  & 1227133513;
+  x |= (y << 1);
+  
+  z &= 0x3FF;
+  z  = (z | (z<<16)) & 4278190335;
+  z  = (z | (z<<8))  & 251719695;
+  z  = (z | (z<<4))  & 3272356035;
+  z  = (z | (z<<2))  & 1227133513;
+  
+  return x | (z << 2);
+}
+
+//Extracts nth interleaved component of a 3-tuple
+exports.deinterleave3 = function(v, n) {
+  v = (v >>> n)       & 1227133513;
+  v = (v | (v>>>2))   & 3272356035;
+  v = (v | (v>>>4))   & 251719695;
+  v = (v | (v>>>8))   & 4278190335;
+  v = (v | (v>>>16))  & 0x3FF;
+  return (v<<22)>>22;
+}
+
+//Computes next combination in colexicographic order (this is mistakenly called nextPermutation on the bit twiddling hacks page)
+exports.nextCombination = function(v) {
+  var t = v | (v - 1);
+  return (t + 1) | (((~t & -~t) - 1) >>> (countTrailingZeros(v) + 1));
+}
+
+
+},{}],33:[function(require,module,exports){
+(function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
+
+function AbstractChainedBatch (db) {
+  this._db         = db
+  this._operations = []
+}
+
+AbstractChainedBatch.prototype.put = function (key, value) {
+  var err = this._db._checkKeyValue(key, 'key', this._db._isBuffer)
+  if (err) throw err
+  err = this._db._checkKeyValue(value, 'value', this._db._isBuffer)
+  if (err) throw err
+
+  if (!this._db._isBuffer(key)) key = String(key)
+  if (!this._db._isBuffer(value)) value = String(value)
+
+  this._operations.push({ type: 'put', key: key, value: value })
+
+  return this
+}
+
+AbstractChainedBatch.prototype.del = function (key) {
+  var err = this._db._checkKeyValue(key, 'key', this._db._isBuffer)
+  if (err) throw err
+
+  if (!this._db._isBuffer(key)) key = String(key)
+
+  this._operations.push({ type: 'del', key: key })
+
+  return this
+}
+
+AbstractChainedBatch.prototype.clear = function () {
+  this._operations = []
+  return this
+}
+
+AbstractChainedBatch.prototype.write = function (options, callback) {
+  if (typeof options == 'function')
+    callback = options
+  if (typeof callback != 'function')
+    throw new Error('write() requires a callback argument')
+  if (typeof options != 'object')
+    options = {}
+
+  if (typeof this._db._batch == 'function')
+    return this._db._batch(this._operations, options, callback)
+
+  process.nextTick(callback)
+}
+
+module.exports = AbstractChainedBatch
+})(require("__browserify_process"))
+},{"__browserify_process":11}],34:[function(require,module,exports){
+(function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
+
+function AbstractIterator (db) {
+  this.db = db
+  this._ended = false
+  this._nexting = false
+}
+
+AbstractIterator.prototype.next = function (callback) {
+  if (typeof callback != 'function')
+    throw new Error('next() requires a callback argument')
+
+  if (this._ended)
+    return callback(new Error('cannot call next() after end()'))
+  if (this._nexting)
+    return callback(new Error('cannot call next() before previous next() has completed'))
+
+  this._nexting = true
+  if (typeof this._next == 'function') {
+    return this._next(function () {
+      this._nexting = false
+      callback.apply(null, arguments)
+    }.bind(this))
+  }
+
+  process.nextTick(function () {
+    this._nexting = false
+    callback()
+  }.bind(this))
+}
+
+AbstractIterator.prototype.end = function (callback) {
+  if (typeof callback != 'function')
+    throw new Error('end() requires a callback argument')
+
+  if (this._ended)
+    return callback(new Error('end() already called on iterator'))
+
+  this._ended = true
+
+  if (typeof this._end == 'function')
+    return this._end(callback)
+
+  process.nextTick(callback)
+}
+
+module.exports = AbstractIterator
+
+})(require("__browserify_process"))
+},{"__browserify_process":11}],35:[function(require,module,exports){
+(function(process,Buffer){/* Copyright (c) 2013 Rod Vagg, MIT License */
+
+var AbstractIterator     = require('./abstract-iterator')
+  , AbstractChainedBatch = require('./abstract-chained-batch')
+
+function AbstractLevelDOWN (location) {
+  if (!arguments.length || location === undefined)
+    throw new Error('constructor requires at least a location argument')
+
+  if (typeof location != 'string')
+    throw new Error('constructor requires a location string argument')
+
+  this.location = location
+}
+
+AbstractLevelDOWN.prototype.open = function (options, callback) {
+  if (typeof options == 'function')
+    callback = options
+  if (typeof callback != 'function')
+    throw new Error('open() requires a callback argument')
+  if (typeof options != 'object')
+    options = {}
+
+  if (typeof this._open == 'function')
+    return this._open(options, callback)
+
+  process.nextTick(callback)
+}
+
+AbstractLevelDOWN.prototype.close = function (callback) {
+  if (typeof callback != 'function')
+    throw new Error('close() requires a callback argument')
+
+  if (typeof this._close == 'function')
+    return this._close(callback)
+
+  process.nextTick(callback)
+}
+
+AbstractLevelDOWN.prototype.get = function (key, options, callback) {
+  if (typeof options == 'function')
+    callback = options
+  if (typeof callback != 'function')
+    throw new Error('get() requires a callback argument')
+  var err = this._checkKeyValue(key, 'key', this._isBuffer)
+  if (err) return callback(err)
+  if (!this._isBuffer(key)) key = String(key)
+  if (typeof options != 'object')
+    options = {}
+
+  if (typeof this._get == 'function')
+    return this._get(key, options, callback)
+
+  process.nextTick(callback.bind(null, new Error('NotFound')))
+}
+
+AbstractLevelDOWN.prototype.put = function (key, value, options, callback) {
+  if (typeof options == 'function')
+    callback = options
+  if (typeof callback != 'function')
+    throw new Error('put() requires a callback argument')
+  var err = this._checkKeyValue(key, 'key', this._isBuffer)
+  if (err) return callback(err)
+  err = this._checkKeyValue(value, 'value', this._isBuffer)
+  if (err) return callback(err)
+  if (!this._isBuffer(key)) key = String(key)
+  // coerce value to string in node, dont touch it in browser
+  // (indexeddb can store any JS type)
+  if (!this._isBuffer(value) && !process.browser) value = String(value)
+  if (typeof options != 'object')
+    options = {}
+  if (typeof this._put == 'function')
+    return this._put(key, value, options, callback)
+
+  process.nextTick(callback)
+}
+
+AbstractLevelDOWN.prototype.del = function (key, options, callback) {
+  if (typeof options == 'function')
+    callback = options
+  if (typeof callback != 'function')
+    throw new Error('del() requires a callback argument')
+  var err = this._checkKeyValue(key, 'key', this._isBuffer)
+  if (err) return callback(err)
+  if (!this._isBuffer(key)) key = String(key)
+  if (typeof options != 'object')
+    options = {}
+
+
+  if (typeof this._del == 'function')
+    return this._del(key, options, callback)
+
+  process.nextTick(callback)
+}
+
+AbstractLevelDOWN.prototype.batch = function (array, options, callback) {
+  if (!arguments.length)
+    return this._chainedBatch()
+
+  if (typeof options == 'function')
+    callback = options
+  if (typeof callback != 'function')
+    throw new Error('batch(array) requires a callback argument')
+  if (!Array.isArray(array))
+    return callback(new Error('batch(array) requires an array argument'))
+  if (typeof options != 'object')
+    options = {}
+
+  var i = 0
+    , l = array.length
+    , e
+    , err
+
+  for (; i < l; i++) {
+    e = array[i]
+    if (typeof e != 'object') continue;
+
+    err = this._checkKeyValue(e.type, 'type', this._isBuffer)
+    if (err) return callback(err)
+
+    err = this._checkKeyValue(e.key, 'key', this._isBuffer)
+    if (err) return callback(err)
+
+    if (e.type == 'put') {
+      err = this._checkKeyValue(e.value, 'value', this._isBuffer)
+      if (err) return callback(err)
+    }
+  }
+
+  if (typeof this._batch == 'function')
+    return this._batch(array, options, callback)
+
+  process.nextTick(callback)
+}
+
+AbstractLevelDOWN.prototype.approximateSize = function (start, end, callback) {
+  if (start == null || end == null || typeof start == 'function' || typeof end == 'function')
+    throw new Error('approximateSize() requires valid `start`, `end` and `callback` arguments')
+  if (typeof callback != 'function')
+    throw new Error('approximateSize() requires a callback argument')
+
+  if (!this._isBuffer(start)) start = String(start)
+  if (!this._isBuffer(end)) end = String(end)
+  if (typeof this._approximateSize == 'function')
+    return this._approximateSize(start, end, callback)
+
+  process.nextTick(callback.bind(null, null, 0))
+}
+
+AbstractLevelDOWN.prototype.iterator = function (options) {
+  if (typeof options != 'object')
+    options = {}
+
+  if (typeof this._iterator == 'function')
+    return this._iterator(options)
+
+  return new AbstractIterator(this)
+}
+
+AbstractLevelDOWN.prototype._chainedBatch = function () {
+  return new AbstractChainedBatch(this)
+}
+
+AbstractLevelDOWN.prototype._isBuffer = function (obj) {
+  return Buffer.isBuffer(obj)
+}
+
+AbstractLevelDOWN.prototype._checkKeyValue = function (obj, type) {
+  if (obj === null || obj === undefined)
+    return new Error(type + ' cannot be `null` or `undefined`')
+  if (obj === null || obj === undefined)
+    return new Error(type + ' cannot be `null` or `undefined`')
+  if (this._isBuffer(obj)) {
+    if (obj.length === 0)
+      return new Error(type + ' cannot be an empty Buffer')
+  } else if (String(obj) === '')
+    return new Error(type + ' cannot be an empty String')
+}
+
+module.exports.AbstractLevelDOWN = AbstractLevelDOWN
+module.exports.AbstractIterator  = AbstractIterator
+})(require("__browserify_process"),require("__browserify_Buffer").Buffer)
+},{"./abstract-chained-batch":33,"./abstract-iterator":34,"__browserify_Buffer":10,"__browserify_process":11}],36:[function(require,module,exports){
+var proto = {}
+module.exports = proto
+
+proto.from = require('./from.js')
+proto.to = require('./to.js')
+proto.is = require('./is.js')
+proto.subarray = require('./subarray.js')
+proto.join = require('./join.js')
+proto.copy = require('./copy.js')
+proto.create = require('./create.js')
+
+mix(require('./read.js'), proto)
+mix(require('./write.js'), proto)
+
+function mix(from, into) {
+  for(var key in from) {
+    into[key] = from[key]
+  }
+}
+
+},{"./copy.js":39,"./create.js":40,"./from.js":41,"./is.js":42,"./join.js":43,"./read.js":45,"./subarray.js":46,"./to.js":47,"./write.js":48}],37:[function(require,module,exports){
+(function (exports) {
+	'use strict';
+
+	var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+	function b64ToByteArray(b64) {
+		var i, j, l, tmp, placeHolders, arr;
+	
+		if (b64.length % 4 > 0) {
+			throw 'Invalid string. Length must be a multiple of 4';
+		}
+
+		// the number of equal signs (place holders)
+		// if there are two placeholders, than the two characters before it
+		// represent one byte
+		// if there is only one, then the three characters before it represent 2 bytes
+		// this is just a cheap hack to not do indexOf twice
+		placeHolders = b64.indexOf('=');
+		placeHolders = placeHolders > 0 ? b64.length - placeHolders : 0;
+
+		// base64 is 4/3 + up to two characters of the original data
+		arr = [];//new Uint8Array(b64.length * 3 / 4 - placeHolders);
+
+		// if there are placeholders, only get up to the last complete 4 chars
+		l = placeHolders > 0 ? b64.length - 4 : b64.length;
+
+		for (i = 0, j = 0; i < l; i += 4, j += 3) {
+			tmp = (lookup.indexOf(b64[i]) << 18) | (lookup.indexOf(b64[i + 1]) << 12) | (lookup.indexOf(b64[i + 2]) << 6) | lookup.indexOf(b64[i + 3]);
+			arr.push((tmp & 0xFF0000) >> 16);
+			arr.push((tmp & 0xFF00) >> 8);
+			arr.push(tmp & 0xFF);
+		}
+
+		if (placeHolders === 2) {
+			tmp = (lookup.indexOf(b64[i]) << 2) | (lookup.indexOf(b64[i + 1]) >> 4);
+			arr.push(tmp & 0xFF);
+		} else if (placeHolders === 1) {
+			tmp = (lookup.indexOf(b64[i]) << 10) | (lookup.indexOf(b64[i + 1]) << 4) | (lookup.indexOf(b64[i + 2]) >> 2);
+			arr.push((tmp >> 8) & 0xFF);
+			arr.push(tmp & 0xFF);
+		}
+
+		return arr;
+	}
+
+	function uint8ToBase64(uint8) {
+		var i,
+			extraBytes = uint8.length % 3, // if we have 1 byte left, pad 2 bytes
+			output = "",
+			temp, length;
+
+		function tripletToBase64 (num) {
+			return lookup[num >> 18 & 0x3F] + lookup[num >> 12 & 0x3F] + lookup[num >> 6 & 0x3F] + lookup[num & 0x3F];
+		};
+
+		// go through the array every three bytes, we'll deal with trailing stuff later
+		for (i = 0, length = uint8.length - extraBytes; i < length; i += 3) {
+			temp = (uint8[i] << 16) + (uint8[i + 1] << 8) + (uint8[i + 2]);
+			output += tripletToBase64(temp);
+		}
+
+		// pad the end with zeros, but make sure to not forget the extra bytes
+		switch (extraBytes) {
+			case 1:
+				temp = uint8[uint8.length - 1];
+				output += lookup[temp >> 2];
+				output += lookup[(temp << 4) & 0x3F];
+				output += '==';
+				break;
+			case 2:
+				temp = (uint8[uint8.length - 2] << 8) + (uint8[uint8.length - 1]);
+				output += lookup[temp >> 10];
+				output += lookup[(temp >> 4) & 0x3F];
+				output += lookup[(temp << 2) & 0x3F];
+				output += '=';
+				break;
+		}
+
+		return output;
+	}
+
+	module.exports.toByteArray = b64ToByteArray;
+	module.exports.fromByteArray = uint8ToBase64;
+}());
+
+},{}],38:[function(require,module,exports){
+module.exports = to_utf8
+
+var out = []
+  , col = []
+  , fcc = String.fromCharCode
+  , mask = [0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]
+  , unmask = [
+      0x00
+    , 0x01
+    , 0x02 | 0x01
+    , 0x04 | 0x02 | 0x01
+    , 0x08 | 0x04 | 0x02 | 0x01
+    , 0x10 | 0x08 | 0x04 | 0x02 | 0x01
+    , 0x20 | 0x10 | 0x08 | 0x04 | 0x02 | 0x01
+    , 0x40 | 0x20 | 0x10 | 0x08 | 0x04 | 0x02 | 0x01
+  ]
+
+function to_utf8(bytes, start, end) {
+  start = start === undefined ? 0 : start
+  end = end === undefined ? bytes.length : end
+
+  var idx = 0
+    , hi = 0x80
+    , collecting = 0
+    , pos
+    , by
+
+  col.length =
+  out.length = 0
+
+  while(idx < bytes.length) {
+    by = bytes[idx]
+    if(!collecting && by & hi) {
+      pos = find_pad_position(by)
+      collecting += pos
+      if(pos < 8) {
+        col[col.length] = by & unmask[6 - pos]
+      }
+    } else if(collecting) {
+      col[col.length] = by & unmask[6]
+      --collecting
+      if(!collecting && col.length) {
+        out[out.length] = fcc(reduced(col, pos))
+        col.length = 0
+      }
+    } else { 
+      out[out.length] = fcc(by)
+    }
+    ++idx
+  }
+  if(col.length && !collecting) {
+    out[out.length] = fcc(reduced(col, pos))
+    col.length = 0
+  }
+  return out.join('')
+}
+
+function find_pad_position(byt) {
+  for(var i = 0; i < 7; ++i) {
+    if(!(byt & mask[i])) {
+      break
+    }
+  }
+  return i
+}
+
+function reduced(list) {
+  var out = 0
+  for(var i = 0, len = list.length; i < len; ++i) {
+    out |= list[i] << ((len - i - 1) * 6)
+  }
+  return out
+}
+
+},{}],39:[function(require,module,exports){
+module.exports = copy
+
+var slice = [].slice
+
+function copy(source, target, target_start, source_start, source_end) {
+  target_start = arguments.length < 3 ? 0 : target_start
+  source_start = arguments.length < 4 ? 0 : source_start
+  source_end = arguments.length < 5 ? source.length : source_end
+
+  if(source_end === source_start) {
+    return
+  }
+
+  if(target.length === 0 || source.length === 0) {
+    return
+  }
+
+  if(source_end > source.length) {
+    source_end = source.length
+  }
+
+  if(target.length - target_start < source_end - source_start) {
+    source_end = target.length - target_start + start
+  }
+
+  if(source.buffer !== target.buffer) {
+    return fast_copy(source, target, target_start, source_start, source_end)
+  }
+  return slow_copy(source, target, target_start, source_start, source_end)
+}
+
+function fast_copy(source, target, target_start, source_start, source_end) {
+  var len = (source_end - source_start) + target_start
+
+  for(var i = target_start, j = source_start;
+      i < len;
+      ++i,
+      ++j) {
+    target[i] = source[j]
+  }
+}
+
+function slow_copy(from, to, j, i, jend) {
+  // the buffers could overlap.
+  var iend = jend + i
+    , tmp = new Uint8Array(slice.call(from, i, iend))
+    , x = 0
+
+  for(; i < iend; ++i, ++x) {
+    to[j++] = tmp[x]
+  }
+}
+
+},{}],40:[function(require,module,exports){
+module.exports = function(size) {
+  return new Uint8Array(size)
+}
+
+},{}],41:[function(require,module,exports){
+module.exports = from
+
+var base64 = require('base64-js')
+
+var decoders = {
+    hex: from_hex
+  , utf8: from_utf
+  , base64: from_base64
+}
+
+function from(source, encoding) {
+  if(Array.isArray(source)) {
+    return new Uint8Array(source)
+  }
+
+  return decoders[encoding || 'utf8'](source)
+}
+
+function from_hex(str) {
+  var size = str.length / 2
+    , buf = new Uint8Array(size)
+    , character = ''
+
+  for(var i = 0, len = str.length; i < len; ++i) {
+    character += str.charAt(i)
+
+    if(i > 0 && (i % 2) === 1) {
+      buf[i>>>1] = parseInt(character, 16)
+      character = '' 
+    }
+  }
+
+  return buf 
+}
+
+function from_utf(str) {
+  var bytes = []
+    , tmp
+    , ch
+
+  for(var i = 0, len = str.length; i < len; ++i) {
+    ch = str.charCodeAt(i)
+    if(ch & 0x80) {
+      tmp = encodeURIComponent(str.charAt(i)).substr(1).split('%')
+      for(var j = 0, jlen = tmp.length; j < jlen; ++j) {
+        bytes[bytes.length] = parseInt(tmp[j], 16)
+      }
+    } else {
+      bytes[bytes.length] = ch 
+    }
+  }
+
+  return new Uint8Array(bytes)
+}
+
+function from_base64(str) {
+  return new Uint8Array(base64.toByteArray(str)) 
+}
+
+},{"base64-js":37}],42:[function(require,module,exports){
+
+module.exports = function(buffer) {
+  return buffer instanceof Uint8Array;
+}
+
+},{}],43:[function(require,module,exports){
+module.exports = join
+
+function join(targets, hint) {
+  if(!targets.length) {
+    return new Uint8Array(0)
+  }
+
+  var len = hint !== undefined ? hint : get_length(targets)
+    , out = new Uint8Array(len)
+    , cur = targets[0]
+    , curlen = cur.length
+    , curidx = 0
+    , curoff = 0
+    , i = 0
+
+  while(i < len) {
+    if(curoff === curlen) {
+      curoff = 0
+      ++curidx
+      cur = targets[curidx]
+      curlen = cur && cur.length
+      continue
+    }
+    out[i++] = cur[curoff++] 
+  }
+
+  return out
+}
+
+function get_length(targets) {
+  var size = 0
+  for(var i = 0, len = targets.length; i < len; ++i) {
+    size += targets[i].byteLength
+  }
+  return size
+}
+
+},{}],44:[function(require,module,exports){
+var proto
+  , map
+
+module.exports = proto = {}
+
+map = typeof WeakMap === 'undefined' ? null : new WeakMap
+
+proto.get = !map ? no_weakmap_get : get
+
+function no_weakmap_get(target) {
+  return new DataView(target.buffer, 0)
+}
+
+function get(target) {
+  var out = map.get(target.buffer)
+  if(!out) {
+    map.set(target.buffer, out = new DataView(target.buffer, 0))
+  }
+  return out
+}
+
+},{}],45:[function(require,module,exports){
+module.exports = {
+    readUInt8:      read_uint8
+  , readInt8:       read_int8
+  , readUInt16LE:   read_uint16_le
+  , readUInt32LE:   read_uint32_le
+  , readInt16LE:    read_int16_le
+  , readInt32LE:    read_int32_le
+  , readFloatLE:    read_float_le
+  , readDoubleLE:   read_double_le
+  , readUInt16BE:   read_uint16_be
+  , readUInt32BE:   read_uint32_be
+  , readInt16BE:    read_int16_be
+  , readInt32BE:    read_int32_be
+  , readFloatBE:    read_float_be
+  , readDoubleBE:   read_double_be
+}
+
+var map = require('./mapped.js')
+
+function read_uint8(target, at) {
+  return target[at]
+}
+
+function read_int8(target, at) {
+  var v = target[at];
+  return v < 0x80 ? v : v - 0x100
+}
+
+function read_uint16_le(target, at) {
+  var dv = map.get(target);
+  return dv.getUint16(at + target.byteOffset, true)
+}
+
+function read_uint32_le(target, at) {
+  var dv = map.get(target);
+  return dv.getUint32(at + target.byteOffset, true)
+}
+
+function read_int16_le(target, at) {
+  var dv = map.get(target);
+  return dv.getInt16(at + target.byteOffset, true)
+}
+
+function read_int32_le(target, at) {
+  var dv = map.get(target);
+  return dv.getInt32(at + target.byteOffset, true)
+}
+
+function read_float_le(target, at) {
+  var dv = map.get(target);
+  return dv.getFloat32(at + target.byteOffset, true)
+}
+
+function read_double_le(target, at) {
+  var dv = map.get(target);
+  return dv.getFloat64(at + target.byteOffset, true)
+}
+
+function read_uint16_be(target, at) {
+  var dv = map.get(target);
+  return dv.getUint16(at + target.byteOffset, false)
+}
+
+function read_uint32_be(target, at) {
+  var dv = map.get(target);
+  return dv.getUint32(at + target.byteOffset, false)
+}
+
+function read_int16_be(target, at) {
+  var dv = map.get(target);
+  return dv.getInt16(at + target.byteOffset, false)
+}
+
+function read_int32_be(target, at) {
+  var dv = map.get(target);
+  return dv.getInt32(at + target.byteOffset, false)
+}
+
+function read_float_be(target, at) {
+  var dv = map.get(target);
+  return dv.getFloat32(at + target.byteOffset, false)
+}
+
+function read_double_be(target, at) {
+  var dv = map.get(target);
+  return dv.getFloat64(at + target.byteOffset, false)
+}
+
+},{"./mapped.js":44}],46:[function(require,module,exports){
+module.exports = subarray
+
+function subarray(buf, from, to) {
+  return buf.subarray(from || 0, to || buf.length)
+}
+
+},{}],47:[function(require,module,exports){
+module.exports = to
+
+var base64 = require('base64-js')
+  , toutf8 = require('to-utf8')
+
+var encoders = {
+    hex: to_hex
+  , utf8: to_utf
+  , base64: to_base64
+}
+
+function to(buf, encoding) {
+  return encoders[encoding || 'utf8'](buf)
+}
+
+function to_hex(buf) {
+  var str = ''
+    , byt
+
+  for(var i = 0, len = buf.length; i < len; ++i) {
+    byt = buf[i]
+    str += ((byt & 0xF0) >>> 4).toString(16)
+    str += (byt & 0x0F).toString(16)
+  }
+
+  return str
+}
+
+function to_utf(buf) {
+  return toutf8(buf)
+}
+
+function to_base64(buf) {
+  return base64.fromByteArray(buf)
+}
+
+
+},{"base64-js":37,"to-utf8":38}],48:[function(require,module,exports){
+module.exports = {
+    writeUInt8:      write_uint8
+  , writeInt8:       write_int8
+  , writeUInt16LE:   write_uint16_le
+  , writeUInt32LE:   write_uint32_le
+  , writeInt16LE:    write_int16_le
+  , writeInt32LE:    write_int32_le
+  , writeFloatLE:    write_float_le
+  , writeDoubleLE:   write_double_le
+  , writeUInt16BE:   write_uint16_be
+  , writeUInt32BE:   write_uint32_be
+  , writeInt16BE:    write_int16_be
+  , writeInt32BE:    write_int32_be
+  , writeFloatBE:    write_float_be
+  , writeDoubleBE:   write_double_be
+}
+
+var map = require('./mapped.js')
+
+function write_uint8(target, value, at) {
+  return target[at] = value
+}
+
+function write_int8(target, value, at) {
+  return target[at] = value < 0 ? value + 0x100 : value
+}
+
+function write_uint16_le(target, value, at) {
+  var dv = map.get(target);
+  return dv.setUint16(at + target.byteOffset, value, true)
+}
+
+function write_uint32_le(target, value, at) {
+  var dv = map.get(target);
+  return dv.setUint32(at + target.byteOffset, value, true)
+}
+
+function write_int16_le(target, value, at) {
+  var dv = map.get(target);
+  return dv.setInt16(at + target.byteOffset, value, true)
+}
+
+function write_int32_le(target, value, at) {
+  var dv = map.get(target);
+  return dv.setInt32(at + target.byteOffset, value, true)
+}
+
+function write_float_le(target, value, at) {
+  var dv = map.get(target);
+  return dv.setFloat32(at + target.byteOffset, value, true)
+}
+
+function write_double_le(target, value, at) {
+  var dv = map.get(target);
+  return dv.setFloat64(at + target.byteOffset, value, true)
+}
+
+function write_uint16_be(target, value, at) {
+  var dv = map.get(target);
+  return dv.setUint16(at + target.byteOffset, value, false)
+}
+
+function write_uint32_be(target, value, at) {
+  var dv = map.get(target);
+  return dv.setUint32(at + target.byteOffset, value, false)
+}
+
+function write_int16_be(target, value, at) {
+  var dv = map.get(target);
+  return dv.setInt16(at + target.byteOffset, value, false)
+}
+
+function write_int32_be(target, value, at) {
+  var dv = map.get(target);
+  return dv.setInt32(at + target.byteOffset, value, false)
+}
+
+function write_float_be(target, value, at) {
+  var dv = map.get(target);
+  return dv.setFloat32(at + target.byteOffset, value, false)
+}
+
+function write_double_be(target, value, at) {
+  var dv = map.get(target);
+  return dv.setFloat64(at + target.byteOffset, value, false)
+}
+
+},{"./mapped.js":44}],49:[function(require,module,exports){
+(function(){/*jshint expr:true */
+/*global window:false, console:false, define:false, module:false */
+
+/**
+ * @license IDBWrapper - A cross-browser wrapper for IndexedDB
+ * Copyright (c) 2011 - 2013 Jens Arps
+ * http://jensarps.de/
+ *
+ * Licensed under the MIT (X11) license
+ */
+
+(function (name, definition, global) {
+  if (typeof define === 'function') {
+    define(definition);
+  } else if (typeof module !== 'undefined' && module.exports) {
+    module.exports = definition();
+  } else {
+    global[name] = definition();
+  }
+})('IDBStore', function () {
+
+  "use strict";
+
+  var defaults = {
+    storeName: 'Store',
+    storePrefix: 'IDBWrapper-',
+    dbVersion: 1,
+    keyPath: 'id',
+    autoIncrement: true,
+    onStoreReady: function () {
+    },
+    onError: function(error){
+      throw error;
+    },
+    indexes: []
+  };
+
+  /**
+   *
+   * The IDBStore constructor
+   *
+   * @constructor
+   * @name IDBStore
+   * @version 1.1.0
+   *
+   * @param {Object} [kwArgs] An options object used to configure the store and
+   *  set callbacks
+   * @param {String} [kwArgs.storeName='Store'] The name of the store
+   * @param {String} [kwArgs.storePrefix='IDBWrapper-'] A prefix that is
+   *  internally used to construct the name of the database, which will be
+   *  kwArgs.storePrefix + kwArgs.storeName
+   * @param {Number} [kwArgs.dbVersion=1] The version of the store
+   * @param {String} [kwArgs.keyPath='id'] The key path to use. If you want to
+   *  setup IDBWrapper to work with out-of-line keys, you need to set this to
+   *  `null`
+   * @param {Boolean} [kwArgs.autoIncrement=true] If set to true, IDBStore will
+   *  automatically make sure a unique keyPath value is present on each object
+   *  that is stored.
+   * @param {Function} [kwArgs.onStoreReady] A callback to be called when the
+   *  store is ready to be used.
+   * @param {Function} [kwArgs.onError=throw] A callback to be called when an
+   *  error occurred during instantiation of the store.
+   * @param {Array} [kwArgs.indexes=[]] An array of indexData objects
+   *  defining the indexes to use with the store. For every index to be used
+   *  one indexData object needs to be passed in the array.
+   *  An indexData object is defined as follows:
+   * @param {Object} [kwArgs.indexes.indexData] An object defining the index to
+   *  use
+   * @param {String} kwArgs.indexes.indexData.name The name of the index
+   * @param {String} [kwArgs.indexes.indexData.keyPath] The key path of the index
+   * @param {Boolean} [kwArgs.indexes.indexData.unique] Whether the index is unique
+   * @param {Boolean} [kwArgs.indexes.indexData.multiEntry] Whether the index is multi entry
+   * @param {Function} [onStoreReady] A callback to be called when the store
+   * is ready to be used.
+   * @example
+      // create a store for customers with an additional index over the
+      // `lastname` property.
+      var myCustomerStore = new IDBStore({
+        dbVersion: 1,
+        storeName: 'customer-index',
+        keyPath: 'customerid',
+        autoIncrement: true,
+        onStoreReady: populateTable,
+        indexes: [
+          { name: 'lastname', keyPath: 'lastname', unique: false, multiEntry: false }
+        ]
+      });
+   * @example
+      // create a generic store
+      var myCustomerStore = new IDBStore({
+        storeName: 'my-data-store',
+        onStoreReady: function(){
+          // start working with the store.
+        }
+      });
+   */
+  var IDBStore = function (kwArgs, onStoreReady) {
+
+    for(var key in defaults){
+      this[key] = typeof kwArgs[key] != 'undefined' ? kwArgs[key] : defaults[key];
+    }
+
+    this.dbName = this.storePrefix + this.storeName;
+    this.dbVersion = parseInt(this.dbVersion, 10);
+
+    onStoreReady && (this.onStoreReady = onStoreReady);
+
+    this.idb = window.indexedDB || window.webkitIndexedDB || window.mozIndexedDB;
+    this.keyRange = window.IDBKeyRange || window.webkitIDBKeyRange || window.mozIDBKeyRange;
+
+    this.consts = {
+      'READ_ONLY':         'readonly',
+      'READ_WRITE':        'readwrite',
+      'VERSION_CHANGE':    'versionchange',
+      'NEXT':              'next',
+      'NEXT_NO_DUPLICATE': 'nextunique',
+      'PREV':              'prev',
+      'PREV_NO_DUPLICATE': 'prevunique'
+    };
+
+    this.openDB();
+  };
+
+  IDBStore.prototype = /** @lends IDBStore */ {
+
+    /**
+     * The version of IDBStore
+     *
+     * @type String
+     */
+    version: '1.2.0',
+
+    /**
+     * A reference to the IndexedDB object
+     *
+     * @type Object
+     */
+    db: null,
+
+    /**
+     * The full name of the IndexedDB used by IDBStore, composed of
+     * this.storePrefix + this.storeName
+     *
+     * @type String
+     */
+    dbName: null,
+
+    /**
+     * The version of the IndexedDB used by IDBStore
+     *
+     * @type Number
+     */
+    dbVersion: null,
+
+    /**
+     * A reference to the objectStore used by IDBStore
+     *
+     * @type Object
+     */
+    store: null,
+
+    /**
+     * The store name
+     *
+     * @type String
+     */
+    storeName: null,
+
+    /**
+     * The key path
+     *
+     * @type String
+     */
+    keyPath: null,
+
+    /**
+     * Whether IDBStore uses autoIncrement
+     *
+     * @type Boolean
+     */
+    autoIncrement: null,
+
+    /**
+     * The indexes used by IDBStore
+     *
+     * @type Array
+     */
+    indexes: null,
+
+    /**
+     * A hashmap of features of the used IDB implementation
+     *
+     * @type Object
+     * @proprty {Boolean} autoIncrement If the implementation supports
+     *  native auto increment
+     */
+    features: null,
+
+    /**
+     * The callback to be called when the store is ready to be used
+     *
+     * @type Function
+     */
+    onStoreReady: null,
+
+    /**
+     * The callback to be called if an error occurred during instantiation
+     * of the store
+     *
+     * @type Function
+     */
+    onError: null,
+
+    /**
+     * The internal insertID counter
+     *
+     * @type Number
+     * @private
+     */
+    _insertIdCount: 0,
+
+    /**
+     * Opens an IndexedDB; called by the constructor.
+     *
+     * Will check if versions match and compare provided index configuration
+     * with existing ones, and update indexes if necessary.
+     *
+     * Will call this.onStoreReady() if everything went well and the store
+     * is ready to use, and this.onError() is something went wrong.
+     *
+     * @private
+     *
+     */
+    openDB: function () {
+
+      var features = this.features = {};
+      features.hasAutoIncrement = !window.mozIndexedDB;
+
+      var openRequest = this.idb.open(this.dbName, this.dbVersion);
+      var preventSuccessCallback = false;
+
+      openRequest.onerror = function (error) {
+
+        var gotVersionErr = false;
+        if ('error' in error.target) {
+          gotVersionErr = error.target.error.name == "VersionError";
+        } else if ('errorCode' in error.target) {
+          gotVersionErr = error.target.errorCode == 12;
+        }
+
+        if (gotVersionErr) {
+          this.onError(new Error('The version number provided is lower than the existing one.'));
+        } else {
+          this.onError(error);
+        }
+      }.bind(this);
+
+      openRequest.onsuccess = function (event) {
+
+        if (preventSuccessCallback) {
+          return;
+        }
+
+        if(this.db){
+          this.onStoreReady();
+          return;
+        }
+
+        this.db = event.target.result;
+
+        if(typeof this.db.version == 'string'){
+          this.onError(new Error('The IndexedDB implementation in this browser is outdated. Please upgrade your browser.'));
+          return;
+        }
+
+        if(!this.db.objectStoreNames.contains(this.storeName)){
+          // We should never ever get here.
+          // Lets notify the user anyway.
+          this.onError(new Error('Something is wrong with the IndexedDB implementation in this browser. Please upgrade your browser.'));
+          return;
+        }
+
+        var emptyTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
+        this.store = emptyTransaction.objectStore(this.storeName);
+
+        // check indexes
+        this.indexes.forEach(function(indexData){
+          var indexName = indexData.name;
+
+          if(!indexName){
+            preventSuccessCallback = true;
+            this.onError(new Error('Cannot create index: No index name given.'));
+            return;
+          }
+
+          this.normalizeIndexData(indexData);
+
+          if(this.hasIndex(indexName)){
+            // check if it complies
+            var actualIndex = this.store.index(indexName);
+            var complies = this.indexComplies(actualIndex, indexData);
+            if(!complies){
+              preventSuccessCallback = true;
+              this.onError(new Error('Cannot modify index "' + indexName + '" for current version. Please bump version number to ' + ( this.dbVersion + 1 ) + '.'));
+            }
+          } else {
+            preventSuccessCallback = true;
+            this.onError(new Error('Cannot create new index "' + indexName + '" for current version. Please bump version number to ' + ( this.dbVersion + 1 ) + '.'));
+          }
+
+        }, this);
+
+        preventSuccessCallback || this.onStoreReady();
+      }.bind(this);
+
+      openRequest.onupgradeneeded = function(/* IDBVersionChangeEvent */ event){
+
+        this.db = event.target.result;
+
+        if(this.db.objectStoreNames.contains(this.storeName)){
+          this.store = event.target.transaction.objectStore(this.storeName);
+        } else {
+          this.store = this.db.createObjectStore(this.storeName, { keyPath: this.keyPath, autoIncrement: this.autoIncrement});
+        }
+
+        this.indexes.forEach(function(indexData){
+          var indexName = indexData.name;
+
+          if(!indexName){
+            preventSuccessCallback = true;
+            this.onError(new Error('Cannot create index: No index name given.'));
+          }
+
+          this.normalizeIndexData(indexData);
+
+          if(this.hasIndex(indexName)){
+            // check if it complies
+            var actualIndex = this.store.index(indexName);
+            var complies = this.indexComplies(actualIndex, indexData);
+            if(!complies){
+              // index differs, need to delete and re-create
+              this.store.deleteIndex(indexName);
+              this.store.createIndex(indexName, indexData.keyPath, { unique: indexData.unique, multiEntry: indexData.multiEntry });
+            }
+          } else {
+            this.store.createIndex(indexName, indexData.keyPath, { unique: indexData.unique, multiEntry: indexData.multiEntry });
+          }
+
+        }, this);
+
+      }.bind(this);
+    },
+
+    /**
+     * Deletes the database used for this store if the IDB implementations
+     * provides that functionality.
+     */
+    deleteDatabase: function () {
+      if (this.idb.deleteDatabase) {
+        this.idb.deleteDatabase(this.dbName);
+      }
+    },
+
+    /*********************
+     * data manipulation *
+     *********************/
+
+    /**
+     * Puts an object into the store. If an entry with the given id exists,
+     * it will be overwritten. This method has a different signature for inline
+     * keys and out-of-line keys; please see the examples below.
+     *
+     * @param {*} [key] The key to store. This is only needed if IDBWrapper
+     *  is set to use out-of-line keys. For inline keys - the default scenario -
+     *  this can be omitted.
+     * @param {Object} value The data object to store.
+     * @param {Function} [onSuccess] A callback that is called if insertion
+     *  was successful.
+     * @param {Function} [onError] A callback that is called if insertion
+     *  failed.
+     * @example
+        // Storing an object, using inline keys (the default scenario):
+        var myCustomer = {
+          customerid: 2346223,
+          lastname: 'Doe',
+          firstname: 'John'
+        };
+        myCustomerStore.put(myCustomer, mySuccessHandler, myErrorHandler);
+        // Note that passing success- and error-handlers is optional.
+     * @example
+        // Storing an object, using out-of-line keys:
+       var myCustomer = {
+         lastname: 'Doe',
+         firstname: 'John'
+       };
+       myCustomerStore.put(2346223, myCustomer, mySuccessHandler, myErrorHandler);
+      // Note that passing success- and error-handlers is optional.
+     */
+    put: function (key, value, onSuccess, onError) {
+      if (this.keyPath !== null) {
+        onError = onSuccess;
+        onSuccess = value;
+        value = key;
+      }
+      onError || (onError = function (error) {
+        console.error('Could not write data.', error);
+      });
+      onSuccess || (onSuccess = noop);
+
+      var hasSuccess = false,
+          result = null,
+          putRequest;
+
+      var putTransaction = this.db.transaction([this.storeName], this.consts.READ_WRITE);
+      putTransaction.oncomplete = function () {
+        var callback = hasSuccess ? onSuccess : onError;
+        callback(result);
+      };
+      putTransaction.onabort = onError;
+      putTransaction.onerror = onError;
+
+      if (this.keyPath !== null) { // in-line keys
+        this._addIdPropertyIfNeeded(value);
+        putRequest = putTransaction.objectStore(this.storeName).put(value);
+      } else { // out-of-line keys
+        putRequest = putTransaction.objectStore(this.storeName).put(value, key);
+      }
+      putRequest.onsuccess = function (event) {
+        hasSuccess = true;
+        result = event.target.result;
+      };
+      putRequest.onerror = onError;
+    },
+
+    /**
+     * Retrieves an object from the store. If no entry exists with the given id,
+     * the success handler will be called with null as first and only argument.
+     *
+     * @param {*} key The id of the object to fetch.
+     * @param {Function} [onSuccess] A callback that is called if fetching
+     *  was successful. Will receive the object as only argument.
+     * @param {Function} [onError] A callback that will be called if an error
+     *  occurred during the operation.
+     */
+    get: function (key, onSuccess, onError) {
+      onError || (onError = function (error) {
+        console.error('Could not read data.', error);
+      });
+      onSuccess || (onSuccess = noop);
+
+      var hasSuccess = false,
+          result = null;
+      
+      var getTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
+      getTransaction.oncomplete = function () {
+        var callback = hasSuccess ? onSuccess : onError;
+        callback(result);
+      };
+      getTransaction.onabort = onError;
+      getTransaction.onerror = onError;
+      var getRequest = getTransaction.objectStore(this.storeName).get(key);
+      getRequest.onsuccess = function (event) {
+        hasSuccess = true;
+        result = event.target.result;
+      };
+      getRequest.onerror = onError;
+    },
+
+    /**
+     * Removes an object from the store.
+     *
+     * @param {*} key The id of the object to remove.
+     * @param {Function} [onSuccess] A callback that is called if the removal
+     *  was successful.
+     * @param {Function} [onError] A callback that will be called if an error
+     *  occurred during the operation.
+     */
+    remove: function (key, onSuccess, onError) {
+      onError || (onError = function (error) {
+        console.error('Could not remove data.', error);
+      });
+      onSuccess || (onSuccess = noop);
+
+      var hasSuccess = false,
+          result = null;
+
+      var removeTransaction = this.db.transaction([this.storeName], this.consts.READ_WRITE);
+      removeTransaction.oncomplete = function () {
+        var callback = hasSuccess ? onSuccess : onError;
+        callback(result);
+      };
+      removeTransaction.onabort = onError;
+      removeTransaction.onerror = onError;
+
+      var deleteRequest = removeTransaction.objectStore(this.storeName)['delete'](key);
+      deleteRequest.onsuccess = function (event) {
+        hasSuccess = true;
+        result = event.target.result;
+      };
+      deleteRequest.onerror = onError;
+    },
+
+    /**
+     * Runs a batch of put and/or remove operations on the store.
+     *
+     * @param {Array} dataArray An array of objects containing the operation to run
+     *  and the data object (for put operations).
+     * @param {Function} [onSuccess] A callback that is called if all operations
+     *  were successful.
+     * @param {Function} [onError] A callback that is called if an error
+     *  occurred during one of the operations.
+     */
+    batch: function (dataArray, onSuccess, onError) {
+      onError || (onError = function (error) {
+        console.error('Could not apply batch.', error);
+      });
+      onSuccess || (onSuccess = noop);
+
+      if(Object.prototype.toString.call(dataArray) != '[object Array]'){
+        onError(new Error('dataArray argument must be of type Array.'));
+      }
+      var batchTransaction = this.db.transaction([this.storeName] , this.consts.READ_WRITE);
+      batchTransaction.oncomplete = function () {
+        var callback = hasSuccess ? onSuccess : onError;
+        callback(hasSuccess);
+      };
+      batchTransaction.onabort = onError;
+      batchTransaction.onerror = onError;
+      
+      var count = dataArray.length;
+      var called = false;
+      var hasSuccess = false;
+
+      var onItemSuccess = function () {
+        count--;
+        if (count === 0 && !called) {
+          called = true;
+          hasSuccess = true;
+        }
+      };
+
+      dataArray.forEach(function (operation) {
+        var type = operation.type;
+        var key = operation.key;
+        var value = operation.value;
+
+        var onItemError = function (err) {
+          batchTransaction.abort();
+          if (!called) {
+            called = true;
+            onError(err, type, key);
+          }
+        };
+
+        if (type == "remove") {
+          var deleteRequest = batchTransaction.objectStore(this.storeName)['delete'](key);
+          deleteRequest.onsuccess = onItemSuccess;
+          deleteRequest.onerror = onItemError;
+        } else if (type == "put") {
+          var putRequest;
+          if (this.keyPath !== null) { // in-line keys
+            this._addIdPropertyIfNeeded(value);
+            putRequest = batchTransaction.objectStore(this.storeName).put(value);
+          } else { // out-of-line keys
+            putRequest = batchTransaction.objectStore(this.storeName).put(value, key);
+          }
+          putRequest.onsuccess = onItemSuccess;
+          putRequest.onerror = onItemError;
+        }
+      }, this);
+    },
+
+    /**
+     * Fetches all entries in the store.
+     *
+     * @param {Function} [onSuccess] A callback that is called if the operation
+     *  was successful. Will receive an array of objects.
+     * @param {Function} [onError] A callback that will be called if an error
+     *  occurred during the operation.
+     */
+    getAll: function (onSuccess, onError) {
+      onError || (onError = function (error) {
+        console.error('Could not read data.', error);
+      });
+      onSuccess || (onSuccess = noop);
+      var getAllTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
+      var store = getAllTransaction.objectStore(this.storeName);
+      if (store.getAll) {
+        this._getAllNative(getAllTransaction, store, onSuccess, onError);
+      } else {
+        this._getAllCursor(getAllTransaction, store, onSuccess, onError);
+      }
+    },
+
+    /**
+     * Implements getAll for IDB implementations that have a non-standard
+     * getAll() method.
+     *
+     * @param {Object} getAllTransaction An open READ transaction.
+     * @param {Object} store A reference to the store.
+     * @param {Function} onSuccess A callback that will be called if the
+     *  operation was successful.
+     * @param {Function} onError A callback that will be called if an
+     *  error occurred during the operation.
+     * @private
+     */
+    _getAllNative: function (getAllTransaction, store, onSuccess, onError) {
+      var hasSuccess = false,
+          result = null;
+
+      getAllTransaction.oncomplete = function () {
+        var callback = hasSuccess ? onSuccess : onError;
+        callback(result);
+      };
+      getAllTransaction.onabort = onError;
+      getAllTransaction.onerror = onError;
+
+      var getAllRequest = store.getAll();
+      getAllRequest.onsuccess = function (event) {
+        hasSuccess = true;
+        result = event.target.result;
+      };
+      getAllRequest.onerror = onError;
+    },
+
+    /**
+     * Implements getAll for IDB implementations that do not have a getAll()
+     * method.
+     *
+     * @param {Object} getAllTransaction An open READ transaction.
+     * @param {Object} store A reference to the store.
+     * @param {Function} onSuccess A callback that will be called if the
+     *  operation was successful.
+     * @param {Function} onError A callback that will be called if an
+     *  error occurred during the operation.
+     * @private
+     */
+    _getAllCursor: function (getAllTransaction, store, onSuccess, onError) {
+      var all = [],
+          hasSuccess = false,
+          result = null;
+
+      getAllTransaction.oncomplete = function () {
+        var callback = hasSuccess ? onSuccess : onError;
+        callback(result);
+      };
+      getAllTransaction.onabort = onError;
+      getAllTransaction.onerror = onError;
+
+      var cursorRequest = store.openCursor();
+      cursorRequest.onsuccess = function (event) {
+        var cursor = event.target.result;
+        if (cursor) {
+          all.push(cursor.value);
+          cursor['continue']();
+        }
+        else {
+          hasSuccess = true;
+          result = all;
+        }
+      };
+      cursorRequest.onError = onError;
+    },
+
+    /**
+     * Clears the store, i.e. deletes all entries in the store.
+     *
+     * @param {Function} [onSuccess] A callback that will be called if the
+     *  operation was successful.
+     * @param {Function} [onError] A callback that will be called if an
+     *  error occurred during the operation.
+     */
+    clear: function (onSuccess, onError) {
+      onError || (onError = function (error) {
+        console.error('Could not clear store.', error);
+      });
+      onSuccess || (onSuccess = noop);
+
+      var hasSuccess = false,
+          result = null;
+
+      var clearTransaction = this.db.transaction([this.storeName], this.consts.READ_WRITE);
+      clearTransaction.oncomplete = function () {
+        var callback = hasSuccess ? onSuccess : onError;
+        callback(result);
+      };
+      clearTransaction.onabort = onError;
+      clearTransaction.onerror = onError;
+
+      var clearRequest = clearTransaction.objectStore(this.storeName).clear();
+      clearRequest.onsuccess = function (event) {
+        hasSuccess = true;
+        result = event.target.result;
+      };
+      clearRequest.onerror = onError;
+    },
+
+    /**
+     * Checks if an id property needs to present on a object and adds one if
+     * necessary.
+     *
+     * @param {Object} dataObj The data object that is about to be stored
+     * @private
+     */
+    _addIdPropertyIfNeeded: function (dataObj) {
+      if (!this.features.hasAutoIncrement && typeof dataObj[this.keyPath] == 'undefined') {
+        dataObj[this.keyPath] = this._insertIdCount++ + Date.now();
+      }
+    },
+
+    /************
+     * indexing *
+     ************/
+
+    /**
+     * Returns a DOMStringList of index names of the store.
+     *
+     * @return {DOMStringList} The list of index names
+     */
+    getIndexList: function () {
+      return this.store.indexNames;
+    },
+
+    /**
+     * Checks if an index with the given name exists in the store.
+     *
+     * @param {String} indexName The name of the index to look for
+     * @return {Boolean} Whether the store contains an index with the given name
+     */
+    hasIndex: function (indexName) {
+      return this.store.indexNames.contains(indexName);
+    },
+
+    /**
+     * Normalizes an object containing index data and assures that all
+     * properties are set.
+     *
+     * @param {Object} indexData The index data object to normalize
+     * @param {String} indexData.name The name of the index
+     * @param {String} [indexData.keyPath] The key path of the index
+     * @param {Boolean} [indexData.unique] Whether the index is unique
+     * @param {Boolean} [indexData.multiEntry] Whether the index is multi entry
+     */
+    normalizeIndexData: function (indexData) {
+      indexData.keyPath = indexData.keyPath || indexData.name;
+      indexData.unique = !!indexData.unique;
+      indexData.multiEntry = !!indexData.multiEntry;
+    },
+
+    /**
+     * Checks if an actual index complies with an expected index.
+     *
+     * @param {Object} actual The actual index found in the store
+     * @param {Object} expected An Object describing an expected index
+     * @return {Boolean} Whether both index definitions are identical
+     */
+    indexComplies: function (actual, expected) {
+      var complies = ['keyPath', 'unique', 'multiEntry'].every(function (key) {
+        // IE10 returns undefined for no multiEntry
+        if (key == 'multiEntry' && actual[key] === undefined && expected[key] === false) {
+          return true;
+        }
+        return expected[key] == actual[key];
+      });
+      return complies;
+    },
+
+    /**********
+     * cursor *
+     **********/
+
+    /**
+     * Iterates over the store using the given options and calling onItem
+     * for each entry matching the options.
+     *
+     * @param {Function} onItem A callback to be called for each match
+     * @param {Object} [options] An object defining specific options
+     * @param {Object} [options.index=null] An IDBIndex to operate on
+     * @param {String} [options.order=ASC] The order in which to provide the
+     *  results, can be 'DESC' or 'ASC'
+     * @param {Boolean} [options.autoContinue=true] Whether to automatically
+     *  iterate the cursor to the next result
+     * @param {Boolean} [options.filterDuplicates=false] Whether to exclude
+     *  duplicate matches
+     * @param {Object} [options.keyRange=null] An IDBKeyRange to use
+     * @param {Boolean} [options.writeAccess=false] Whether grant write access
+     *  to the store in the onItem callback
+     * @param {Function} [options.onEnd=null] A callback to be called after
+     *  iteration has ended
+     * @param {Function} [options.onError=console.error] A callback to be called
+     *  if an error occurred during the operation.
+     */
+    iterate: function (onItem, options) {
+      options = mixin({
+        index: null,
+        order: 'ASC',
+        autoContinue: true,
+        filterDuplicates: false,
+        keyRange: null,
+        writeAccess: false,
+        onEnd: null,
+        onError: function (error) {
+          console.error('Could not open cursor.', error);
+        }
+      }, options || {});
+
+      var directionType = options.order.toLowerCase() == 'desc' ? 'PREV' : 'NEXT';
+      if (options.filterDuplicates) {
+        directionType += '_NO_DUPLICATE';
+      }
+
+      var hasSuccess = false;
+      var cursorTransaction = this.db.transaction([this.storeName], this.consts[options.writeAccess ? 'READ_WRITE' : 'READ_ONLY']);
+      var cursorTarget = cursorTransaction.objectStore(this.storeName);
+      if (options.index) {
+        cursorTarget = cursorTarget.index(options.index);
+      }
+
+      cursorTransaction.oncomplete = function () {
+        if (!hasSuccess) {
+          options.onError(null);
+          return;
+        }
+        if (options.onEnd) {
+          options.onEnd();
+        } else {
+          onItem(null);
+        }
+      };
+      cursorTransaction.onabort = options.onError;
+      cursorTransaction.onerror = options.onError;
+
+      var cursorRequest = cursorTarget.openCursor(options.keyRange, this.consts[directionType]);
+      cursorRequest.onerror = options.onError;
+      cursorRequest.onsuccess = function (event) {
+        var cursor = event.target.result;
+        if (cursor) {
+          onItem(cursor.value, cursor, cursorTransaction);
+          if (options.autoContinue) {
+            cursor['continue']();
+          }
+        } else {
+          hasSuccess = true;
+        }
+      };
+    },
+
+    /**
+     * Runs a query against the store and passes an array containing matched
+     * objects to the success handler.
+     *
+     * @param {Function} onSuccess A callback to be called when the operation
+     *  was successful.
+     * @param {Object} [options] An object defining specific query options
+     * @param {Object} [options.index=null] An IDBIndex to operate on
+     * @param {String} [options.order=ASC] The order in which to provide the
+     *  results, can be 'DESC' or 'ASC'
+     * @param {Boolean} [options.filterDuplicates=false] Whether to exclude
+     *  duplicate matches
+     * @param {Object} [options.keyRange=null] An IDBKeyRange to use
+     * @param {Function} [options.onError=console.error] A callback to be called if an error
+     *  occurred during the operation.
+     */
+    query: function (onSuccess, options) {
+      var result = [];
+      options = options || {};
+      options.onEnd = function () {
+        onSuccess(result);
+      };
+      this.iterate(function (item) {
+        result.push(item);
+      }, options);
+    },
+
+    /**
+     *
+     * Runs a query against the store, but only returns the number of matches
+     * instead of the matches itself.
+     *
+     * @param {Function} onSuccess A callback to be called if the opration
+     *  was successful.
+     * @param {Object} [options] An object defining specific options
+     * @param {Object} [options.index=null] An IDBIndex to operate on
+     * @param {Object} [options.keyRange=null] An IDBKeyRange to use
+     * @param {Function} [options.onError=console.error] A callback to be called if an error
+     *  occurred during the operation.
+     */
+    count: function (onSuccess, options) {
+
+      options = mixin({
+        index: null,
+        keyRange: null
+      }, options || {});
+
+      var onError = options.onError || function (error) {
+        console.error('Could not open cursor.', error);
+      };
+
+      var hasSuccess = false,
+          result = null;
+
+      var cursorTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
+      cursorTransaction.oncomplete = function () {
+        var callback = hasSuccess ? onSuccess : onError;
+        callback(result);
+      };
+      cursorTransaction.onabort = onError;
+      cursorTransaction.onerror = onError;
+
+      var cursorTarget = cursorTransaction.objectStore(this.storeName);
+      if (options.index) {
+        cursorTarget = cursorTarget.index(options.index);
+      }
+      var countRequest = cursorTarget.count(options.keyRange);
+      countRequest.onsuccess = function (evt) {
+        hasSuccess = true;
+        result = evt.target.result;
+      };
+      countRequest.onError = onError;
+    },
+
+    /**************/
+    /* key ranges */
+    /**************/
+
+    /**
+     * Creates a key range using specified options. This key range can be
+     * handed over to the count() and iterate() methods.
+     *
+     * Note: You must provide at least one or both of "lower" or "upper" value.
+     *
+     * @param {Object} options The options for the key range to create
+     * @param {*} [options.lower] The lower bound
+     * @param {Boolean} [options.excludeLower] Whether to exclude the lower
+     *  bound passed in options.lower from the key range
+     * @param {*} [options.upper] The upper bound
+     * @param {Boolean} [options.excludeUpper] Whether to exclude the upper
+     *  bound passed in options.upper from the key range
+     * @return {Object} The IDBKeyRange representing the specified options
+     */
+    makeKeyRange: function(options){
+      /*jshint onecase:true */
+      var keyRange,
+          hasLower = typeof options.lower != 'undefined',
+          hasUpper = typeof options.upper != 'undefined';
+
+      switch(true){
+        case hasLower && hasUpper:
+          keyRange = this.keyRange.bound(options.lower, options.upper, options.excludeLower, options.excludeUpper);
+          break;
+        case hasLower:
+          keyRange = this.keyRange.lowerBound(options.lower, options.excludeLower);
+          break;
+        case hasUpper:
+          keyRange = this.keyRange.upperBound(options.upper, options.excludeUpper);
+          break;
+        default:
+          throw new Error('Cannot create KeyRange. Provide one or both of "lower" or "upper" value.');
+      }
+
+      return keyRange;
+
+    }
+
+  };
+
+  /** helpers **/
+
+  var noop = function () {
+  };
+  var empty = {};
+  var mixin = function (target, source) {
+    var name, s;
+    for (name in source) {
+      s = source[name];
+      if (s !== empty[name] && s !== target[name]) {
+        target[name] = s;
+      }
+    }
+    return target;
+  };
+
+  IDBStore.version = IDBStore.prototype.version;
+
+  return IDBStore;
+
+}, this);
+
+})()
+},{}],50:[function(require,module,exports){
 module.exports = Level
 
 var IDB = require('idb-wrapper')
@@ -14281,7 +14090,7 @@ function StringToArrayBuffer(str) {
   return buf
 }
 
-},{"./iterator":58,"abstract-leveldown":42,"idb-wrapper":56,"isbuffer":59,"util":5}],58:[function(require,module,exports){
+},{"./iterator":51,"abstract-leveldown":35,"idb-wrapper":49,"isbuffer":52,"util":5}],51:[function(require,module,exports){
 var util = require('util')
 var AbstractIterator  = require('abstract-leveldown').AbstractIterator
 module.exports = Iterator
@@ -14367,7 +14176,7 @@ Iterator.prototype._next = function (callback) {
   }
   this.callback = callback
 }
-},{"abstract-leveldown":42,"util":5}],59:[function(require,module,exports){
+},{"abstract-leveldown":35,"util":5}],52:[function(require,module,exports){
 (function(){var Buffer = require('buffer').Buffer;
 
 module.exports = isBuffer;
@@ -14378,1688 +14187,337 @@ function isBuffer (o) {
 }
 
 })()
-},{"buffer":7}],60:[function(require,module,exports){
-/* Copyright (c) 2012-2013 LevelUP contributors
- * See list at <https://github.com/rvagg/node-levelup#contributing>
- * MIT +no-false-attribs License
- * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
- */
+},{"buffer":7}],53:[function(require,module,exports){
+(function(process){var EventEmitter = require('events').EventEmitter
+var next         = process.nextTick
+var SubDb        = require('./sub')
+var fixRange     = require('level-fix-range')
 
-var createError  = require('errno').custom.createError
-  , LevelUPError = createError('LevelUPError')
+var Hooks   = require('level-hooks')
 
-module.exports = {
-    LevelUPError        : LevelUPError
-  , InitializationError : createError('InitializationError', LevelUPError)
-  , OpenError           : createError('OpenError', LevelUPError)
-  , ReadError           : createError('ReadError', LevelUPError)
-  , WriteError          : createError('WriteError', LevelUPError)
-  , NotFoundError       : createError('NotFoundError', LevelUPError)
-  , EncodingError       : createError('EncodingError', LevelUPError)
+module.exports   = function (db, options) {
+  if (db.sublevel) return db
+
+  options = options || {}
+
+  //use \xff (255) as the seperator,
+  //so that sections of the database will sort after the regular keys
+  var sep = options.sep = options.sep || '\xff'
+  db._options = options
+
+  Hooks(db)
+
+  db.sublevels = {}
+
+  db.sublevel = function (prefix, options) {
+    if(db.sublevels[prefix])
+      return db.sublevels[prefix]
+    return new SubDb(db, prefix, options || this._options)
+  }
+
+  db.methods = {}
+
+  db.prefix = function (key) {
+    return '' + (key || '')
+  }
+
+  db.pre = function (range, hook) {
+    if(!hook)
+      hook = range, range = {
+        max  : sep
+      }
+    return db.hooks.pre(range, hook)
+  }
+
+  db.post = function (range, hook) {
+    if(!hook)
+      hook = range, range = {
+        max : sep
+      }
+    return db.hooks.post(range, hook)
+  }
+
+  function safeRange(fun) {
+    return function (opts) {
+      opts = opts || {}
+      fixRange(opts)
+
+      if(opts.reverse) opts.start = opts.start || sep
+      else             opts.end   = opts.end || sep
+
+      return fun.call(db, opts)
+    }
+  }
+
+  db.readStream =
+  db.createReadStream  = safeRange(db.createReadStream)
+  db.keyStream =
+  db.createKeyStream   = safeRange(db.createKeyStream)
+  db.valuesStream =
+  db.createValueStream = safeRange(db.createValueStream)
+  
+  var batch = db.batch
+  db.batch = function (changes, opts, cb) {
+    changes.forEach(function (e) {
+      if(e.prefix) {
+        if('function' === typeof e.prefix.prefix)
+          e.key = e.prefix.prefix(e.key)
+        else if('string'  === typeof e.prefix)
+          e.key = e.prefix + e.key
+      }
+    })
+    batch.call(db, changes, opts, cb)
+  }
+  return db
 }
 
-},{"errno":68}],61:[function(require,module,exports){
-(function(process){/* Copyright (c) 2012-2013 LevelUP contributors
- * See list at <https://github.com/rvagg/node-levelup#contributing>
- * MIT +no-false-attribs License
- * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
- */
-
-var EventEmitter   = require('events').EventEmitter
-  , inherits       = require('util').inherits
-  , extend         = require('xtend')
-  , prr            = require('prr')
-
-  , errors         = require('./errors')
-  , readStream     = require('./read-stream')
-  , writeStream    = require('./write-stream')
-  , util           = require('./util')
-
-  , toEncoding     = util.toEncoding
-  , toSlice        = util.toSlice
-  , getOptions     = util.getOptions
-  , defaultOptions = util.defaultOptions
-  , getLevelDOWN   = util.getLevelDOWN
-
-
-  , createLevelUP = function (location, options, callback) {
-
-      // Possible status values:
-      //  - 'new'     - newly created, not opened or closed
-      //  - 'opening' - waiting for the database to be opened, post open()
-      //  - 'open'    - successfully opened the database, available for use
-      //  - 'closing' - waiting for the database to be closed, post close()
-      //  - 'closed'  - database has been successfully closed, should not be
-      //                 used except for another open() operation
-
-      var status = 'new'
-        , error
-        , levelup
-
-        , isOpen        = function () { return status == 'open' }
-        , isOpening     = function () { return status == 'opening' }
-
-        , dispatchError = function (error, callback) {
-            return typeof callback == 'function'
-              ? callback(error)
-              : levelup.emit('error', error)
-          }
-
-        , getCallback = function (options, callback) {
-            return typeof options == 'function' ? options : callback
-          }
-
-        , deferred = [ 'get', 'put', 'batch', 'del', 'approximateSize' ]
-            .reduce(function (o, method) {
-              o[method] = function () {
-                var args = Array.prototype.slice.call(arguments)
-                levelup.once('ready', function () {
-                  levelup.db[method].apply(levelup.db, args)
-                })
-              }
-              return o
-            }, {})
-
-      if (typeof options == 'function') {
-        callback = options
-        options  = {}
-      }
-
-      options = getOptions(levelup, options)
-
-      if (typeof location != 'string') {
-        error = new errors.InitializationError(
-            'Must provide a location for the database')
-        if (callback)
-          return callback(error)
-        throw error
-      }
-
-      function LevelUP (location, options) {
-        EventEmitter.call(this)
-        this.setMaxListeners(Infinity)
-
-        this.options = extend(defaultOptions, options)
-        // set this.location as enumerable but not configurable or writable
-        prr(this, 'location', location, 'e')
-      }
-
-      inherits(LevelUP, EventEmitter)
-
-      LevelUP.prototype.open = function (callback) {
-        var self = this
-        if (isOpen()) {
-          if (callback) {
-            process.nextTick(function () { callback(null, self) })
-          }
-          return self
-        }
-
-        if (isOpening()) {
-          return callback && levelup.once(
-              'open'
-            , function () { callback(null, self) }
-          )
-        }
-
-        levelup.emit('opening')
-
-        status = 'opening'
-        self.db = deferred
-
-        var dbFactory = levelup.options.db || getLevelDOWN()
-          , db        = dbFactory(levelup.location)
-
-        db.open(levelup.options, function (err) {
-          if (err) {
-            err = new errors.OpenError(err)
-            return dispatchError(err, callback)
-          } else {
-            levelup.db = db
-            status = 'open'
-            if (callback)
-              callback(null, levelup)
-            levelup.emit('open')
-            levelup.emit('ready')
-          }
-        })
-      }
-
-      LevelUP.prototype.close = function (callback) {
-        if (isOpen()) {
-          status = 'closing'
-          this.db.close(function () {
-            status = 'closed'
-            levelup.emit('closed')
-            if (callback)
-              callback.apply(null, arguments)
-          })
-          levelup.emit('closing')
-          this.db = null
-        } else if (status == 'closed' && callback) {
-          callback()
-        } else if (status == 'closing' && callback) {
-          levelup.once('closed', callback)
-        } else if (isOpening()) {
-          levelup.once('open', function () {
-            levelup.close(callback)
-          })
-        }
-      }
-
-      LevelUP.prototype.isOpen = function () { return isOpen() }
-
-      LevelUP.prototype.isClosed = function () { return (/^clos/).test(status) }
-
-      LevelUP.prototype.get = function (key_, options, callback) {
-        var key
-          , valueEnc
-          , err
-
-        callback = getCallback(options, callback)
-
-        if (typeof callback != 'function') {
-          err = new errors.ReadError('get() requires key and callback arguments')
-          return dispatchError(err)
-        }
-
-        if (!isOpening() && !isOpen()) {
-          err = new errors.ReadError('Database is not open')
-          return dispatchError(err, callback)
-        }
-
-        options  = getOptions(levelup, options)
-        key      = toSlice[options.keyEncoding](key_)
-        valueEnc = options.valueEncoding
-        options.asBuffer = valueEnc != 'utf8' && valueEnc != 'json'
-
-        this.db.get(key, options, function (err, value) {
-          if (err) {
-            if ((/notfound/i).test(err)) {
-              err = new errors.NotFoundError(
-                  'Key not found in database [' + key_ + ']', err)
-            } else {
-              err = new errors.ReadError(err)
-            }
-            return dispatchError(err, callback)
-          }
-          if (callback) {
-            try {
-              value = toEncoding[valueEnc](value)
-            } catch (e) {
-              return callback(new errors.EncodingError(e))
-            }
-            callback(null, value)
-          }
-        })
-      }
-
-      LevelUP.prototype.put = function (key_, value_, options, callback) {
-        var err
-          , key
-          , value
-
-        callback = getCallback(options, callback)
-
-        if (key_ === null || key_ === undefined
-              || value_ === null || value_ === undefined) {
-          err = new errors.WriteError('put() requires key and value arguments')
-          return dispatchError(err, callback)
-        }
-
-        if (!isOpening() && !isOpen()) {
-          err = new errors.WriteError('Database is not open')
-          return dispatchError(err, callback)
-        }
-
-        options = getOptions(levelup, options)
-        key     = toSlice[options.keyEncoding](key_)
-        value   = toSlice[options.valueEncoding](value_)
-
-        this.db.put(key, value, options, function (err) {
-          if (err) {
-            err = new errors.WriteError(err)
-            return dispatchError(err, callback)
-          } else {
-            levelup.emit('put', key_, value_)
-            if (callback)
-              callback()
-          }
-        })
-      }
-
-      LevelUP.prototype.del = function (key_, options, callback) {
-        var err
-          , key
-
-        callback = getCallback(options, callback)
-
-        if (key_ === null || key_ === undefined) {
-          err = new errors.WriteError('del() requires a key argument')
-          return dispatchError(err, callback)
-        }
-
-        if (!isOpening() && !isOpen()) {
-          err = new errors.WriteError('Database is not open')
-          return dispatchError(err, callback)
-        }
-
-        options = getOptions(levelup, options)
-        key     = toSlice[options.keyEncoding](key_)
-
-        this.db.del(key, options, function (err) {
-          if (err) {
-            err = new errors.WriteError(err)
-            return dispatchError(err, callback)
-          } else {
-            levelup.emit('del', key_)
-            if (callback)
-              callback()
-          }
-        })
-      }
-
-      function Batch (db) {
-        this.batch = db.batch()
-        this.ops = []
-      }
-
-      Batch.prototype.put = function (key, value, options) {
-        options = getOptions(levelup, options)
-
-        if (key)
-          key = toSlice[options.keyEncoding](key)
-        if (value)
-          value = toSlice[options.valueEncoding](value)
-
-        try {
-          this.batch.put(key, value)
-        } catch (e) {
-          throw new errors.WriteError(e)
-        }
-        this.ops.push({ type : 'put', key : key, value : value })
-
-        return this
-      }
-
-      Batch.prototype.del = function (key, options) {
-        options = getOptions(levelup, options)
-
-        if (key)
-          key = toSlice[options.keyEncoding](key)
-
-        try {
-          this.batch.del(key)
-        } catch (err) {
-          throw new errors.WriteError(err)
-        }
-        this.ops.push({ type : 'del', key : key })
-
-        return this
-      }
-
-      Batch.prototype.clear = function () {
-        try {
-          this.batch.clear()
-        } catch (err) {
-          throw new errors.WriteError(err)
-        }
-
-        this.ops = []
-        return this
-      }
-
-      Batch.prototype.write = function (callback) {
-        var ops = this.ops
-        try {
-          this.batch.write(function (err) {
-            if (err)
-              return dispatchError(new errors.WriteError(err), callback)
-            levelup.emit('batch', ops)
-            if (callback)
-              callback()
-          })
-        } catch (err) {
-          throw new errors.WriteError(err)
-        }
-      }
-
-      LevelUP.prototype.batch = function (arr, options, callback) {
-        var keyEnc
-          , valueEnc
-          , err
-
-        if (!arguments.length)
-          return new Batch(this.db)
-
-        callback = getCallback(options, callback)
-
-        if (!Array.isArray(arr)) {
-          err = new errors.WriteError('batch() requires an array argument')
-          return dispatchError(err, callback)
-        }
-
-        if (!isOpening() && !isOpen()) {
-          err = new errors.WriteError('Database is not open')
-          return dispatchError(err, callback)
-        }
-
-        options  = getOptions(levelup, options)
-        keyEnc   = options.keyEncoding
-        valueEnc = options.valueEncoding
-
-        arr = arr.map(function (e) {
-          if (e.type === undefined || e.key === undefined) {
-            return {}
-          }
-
-          // inherit encoding
-          var kEnc = e.keyEncoding || keyEnc
-            , vEnc = e.valueEncoding || e.encoding || valueEnc
-            , o
-
-          // If we're not dealing with plain utf8 strings or plain
-          // Buffers then we have to do some work on the array to
-          // encode the keys and/or values. This includes JSON types.
-          if (kEnc != 'utf8' && kEnc != 'binary'
-              || vEnc != 'utf8' && vEnc != 'binary') {
-            o = { type: e.type, key: toSlice[kEnc](e.key) }
-
-            if (e.value !== undefined)
-              o.value = toSlice[vEnc](e.value)
-
-            return o
-          } else {
-            return e
-          }
-        })
-
-        this.db.batch(arr, options, function (err) {
-          if (err) {
-            err = new errors.WriteError(err)
-            return dispatchError(err, callback)
-          } else {
-            levelup.emit('batch', arr)
-            if (callback)
-              callback()
-          }
-        })
-      }
-
-      // DEPRECATED: prefer accessing LevelDOWN for this: db.db.approximateSize()
-      LevelUP.prototype.approximateSize = function (start, end, callback) {
-        var err
-
-        if (start === null || start === undefined
-              || end === null || end === undefined
-              || typeof callback != 'function') {
-          err = new errors.ReadError('approximateSize() requires start, end and callback arguments')
-          return dispatchError(err, callback)
-        }
-
-        if (!isOpening() && !isOpen()) {
-          err = new errors.WriteError('Database is not open')
-          return dispatchError(err, callback)
-        }
-
-        this.db.approximateSize(start, end, function (err, size) {
-          if (err) {
-            err = new errors.OpenError(err)
-            return dispatchError(err, callback)
-          } else if (callback)
-            callback(null, size)
-        })
-      }
-
-      LevelUP.prototype.readStream =
-      LevelUP.prototype.createReadStream = function (options) {
-        options = extend(this.options, options)
-        return readStream.create(
-            options
-          , this
-          , function (options) {
-              return levelup.db.iterator(options)
-            }
-        )
-      }
-
-      LevelUP.prototype.keyStream =
-      LevelUP.prototype.createKeyStream = function (options) {
-        return this.readStream(extend(options, { keys: true, values: false }))
-      }
-
-      LevelUP.prototype.valueStream =
-      LevelUP.prototype.createValueStream = function (options) {
-        return this.readStream(extend(options, { keys: false, values: true }))
-      }
-
-      LevelUP.prototype.writeStream =
-      LevelUP.prototype.createWriteStream = function (options) {
-        return writeStream.create(extend(options), this)
-      }
-
-      LevelUP.prototype.toString = function () {
-        return 'LevelUP'
-      }
-
-      levelup = new LevelUP(location, options)
-      levelup.open(callback)
-      return levelup
-    }
-
-  , utilStatic = function (name) {
-      return function (location, callback) {
-        getLevelDOWN()[name](location, callback || function () {})
-      }
-    }
-
-module.exports         = createLevelUP
-module.exports.copy    = util.copy
-// DEPRECATED: prefer accessing LevelDOWN for this: require('leveldown').destroy()
-module.exports.destroy = utilStatic('destroy')
-// DEPRECATED: prefer accessing LevelDOWN for this: require('leveldown').repair()
-module.exports.repair  = utilStatic('repair')
 
 })(require("__browserify_process"))
-},{"./errors":60,"./read-stream":63,"./util":64,"./write-stream":65,"__browserify_process":11,"events":3,"prr":69,"util":5,"xtend":72}],62:[function(require,module,exports){
-function State () {
-  this.ended = this._ready = this._reading = this._destroyed = this._paused = false
+},{"./sub":63,"__browserify_process":11,"events":3,"level-fix-range":54,"level-hooks":55}],54:[function(require,module,exports){
+
+module.exports = 
+function fixRange(opts) {
+  var reverse = opts.reverse
+  var end     = opts.max || opts.end
+  var start   = opts.min || opts.start
+
+  var range = [start, end]
+  if(start != null && end != null)
+    range.sort()
+  if(reverse)
+    range = range.reverse()
+
+  opts.start   = range[0]
+  opts.end     = range[1]
+
+  delete opts.min
+  delete opts.max
+
+  return opts
 }
 
-State.prototype.end = function() {
-  this.ended = true
-  this._destroyed = false
-}
 
-State.prototype.ready = function() {
-  this._ready = true
-}
+},{}],55:[function(require,module,exports){
+var ranges = require('string-range')
 
-State.prototype.destroy = function() {
-  this._destroyed = true
-}
+module.exports = function (db) {
 
-State.prototype.pause = function() {
-  this._paused = true
-}
+  if(db.hooks) {
+    return     
+  }
 
-State.prototype.resume = function() {
-  this._paused = false
-}
+  var posthooks = []
+  var prehooks  = []
 
-State.prototype.read = function() {
-  this._reading = true
-}
+  function getPrefix (p) {
+    return p && (
+        'string' ===   typeof p        ? p
+      : 'string' ===   typeof p.prefix ? p.prefix
+      : 'function' === typeof p.prefix ? p.prefix()
+      :                                  ''
+      )
+  }
 
-State.prototype.endRead = function() {
-  this._reading = false
-}
-
-State.prototype.canPause = function() {
-  return !this.ended && !this._paused
-}
-
-State.prototype.canResume = function() {
-  return !this.ended && this._paused
-}
-
-State.prototype.canRead = function() {
-  return !this.ended && !this._reading && !this._paused
-}
-
-State.prototype.canCleanup = function() {
-  return !this.ended && !this._reading
-}
-
-State.prototype.canEmitData = function() {
-  return !this.ended && !this._destroyed
-}
-
-State.prototype.canEnd = function() {
-  return !this.ended
-}
-
-module.exports = function () { return new State() }
-},{}],63:[function(require,module,exports){
-(function(Buffer){/* Copyright (c) 2012-2013 LevelUP contributors
- * See list at <https://github.com/rvagg/node-levelup#contributing>
- * MIT +no-false-attribs License <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
- */
-
-var Stream       = require('stream').Stream
-  , bufferStream = require('simple-bufferstream')
-  , inherits     = require('util').inherits
-  , extend       = require('xtend')
-  , errors       = require('./errors')
-  , State        = require('./read-stream-state')
-
-  , toEncoding   = require('./util').toEncoding
-  , toSlice      = require('./util').toSlice
-
-  , defaultOptions = { keys: true, values: true }
-
-  , makeKeyValueData = function (key, keyEncoding, value, valueEncoding) {
-      return {
-          key: toEncoding[keyEncoding](key)
-        , value: toEncoding[valueEncoding](value)
-      }
+  function remover (array, item) {
+    return function () {
+      var i = array.indexOf(item)
+      if(!~i) return false        
+      array.splice(i, 1)
+      return true
     }
-  , makeKeyData = function (key, keyEncoding) {
-      return toEncoding[keyEncoding](key)
+  }
+
+  db.hooks = {
+    post: function (prefix, hook) {
+      if(!hook) hook = prefix, prefix = ''
+      var h = {test: ranges.checker(prefix), hook: hook}
+      posthooks.push(h)
+      return remover(posthooks, h)
+    },
+    pre: function (prefix, hook) {
+      if(!hook) hook = prefix, prefix = ''
+      var h = {test: ranges.checker(prefix), hook: hook}
+      prehooks.push(h)
+      return remover(prehooks, h)
+    },
+    posthooks: posthooks,
+    prehooks: prehooks
+  }
+
+  //POST HOOKS
+
+  function each (e) {
+    if(e && e.type) {
+      posthooks.forEach(function (h) {
+        if(h.test(e.key)) h.hook(e)
+      })
     }
-  , makeValueData = function (_, __, value, valueEncoding) {
-      return toEncoding[valueEncoding](value)
-    }
-  , makeNoData = function () { return null }
-
-function ReadStream (options, db, iteratorFactory) {
-  Stream.call(this)
-
-  this._state = State()
-
-  this._dataEvent = 'data'
-  this.readable = true
-  this.writable = false
-
-  // purely to keep `db` around until we're done so it's not GCed if the user doesn't keep a ref
-  this._db = db
-
-  options = this._options = extend(defaultOptions, options)
-  this._keyEncoding   = options.keyEncoding   || options.encoding
-  this._valueEncoding = options.valueEncoding || options.encoding
-  if (typeof this._options.start != 'undefined')
-    this._options.start = toSlice[this._keyEncoding](this._options.start)
-  if (typeof this._options.end != 'undefined')
-    this._options.end = toSlice[this._keyEncoding](this._options.end)
-  if (typeof this._options.limit != 'number')
-    this._options.limit = -1
-  this._options.keyAsBuffer   = this._keyEncoding != 'utf8'   && this._keyEncoding != 'json'
-  this._options.valueAsBuffer = this._valueEncoding != 'utf8' && this._valueEncoding != 'json'
-
-  this._makeData = this._options.keys && this._options.values
-    ? makeKeyValueData : this._options.keys
-      ? makeKeyData : this._options.values
-        ? makeValueData : makeNoData
-
-  var self = this
-  var ready = function () {
-    if (!self._state.canEmitData())
-      return
-
-    self._state.ready()
-    self._iterator = iteratorFactory(self._options)
-    self._read()
   }
 
-  if (db.isOpen())
-    ready()
-  else
-    db.once('ready', ready)
-}
+  db.on('put', function (key, val) {
+    each({type: 'put', key: key, value: val})
+  })
+  db.on('del', function (key, val) {
+    each({type: 'del', key: key, value: val})
+  })
+  db.on('batch', function onBatch (ary) {
+    ary.forEach(each)
+  })
 
-inherits(ReadStream, Stream)
+  //PRE HOOKS
 
-ReadStream.prototype.destroy = function () {
-  this._state.destroy()
-  if (this._state.canCleanup())
-    this._cleanup()
-}
+  var put = db.put
+  var del = db.del
+  var batch = db.batch
 
-ReadStream.prototype.pause = function () {
-  if (this._state.canPause()) {
-    this._state.pause()
-    this.emit('pause')
-  }
-}
-
-ReadStream.prototype.resume = function () {
-  if (this._state.canResume()) {
-    this.emit('resume')
-    this._state.resume()
-    this._read()
-  }
-}
-
-ReadStream.prototype.pipe = function (dest) {
-  if (typeof dest.add == 'function' && this._options.type == 'fstream') {
-    this._dataEvent = 'entry'
-    var self = this
-    this.on('entry', function (data) {
-      var entry = bufferStream(new Buffer(data.value))
-      entry.path = data.key.toString()
-      entry.type = 'File'
-      entry.props = {
-          type: 'File'
-        , path: data.key.toString()
-      }
-      entry.pause()
-      if (dest.add(entry) === false)
-        self.pause()
-    })
-  }
-  return Stream.prototype.pipe.apply(this, arguments)
-}
-
-ReadStream.prototype._read = function () {
-  var self = this
-  if (this._state.canRead()) {
-    this._state.read()
-    this._iterator.next(function(err, key, value) {
-      self._onData(err, key, value)
-    })
-  }
-}
-
-ReadStream.prototype._onData = function (err, key, value) {
-  this._state.endRead()
-  if (err || (key === undefined && value === undefined) || !this._state.canEmitData())
-    return this._cleanup(err)
-  this._read() // queue another read even tho we may not need it
-  try {
-    value = this._makeData(key, this._keyEncoding, value, this._valueEncoding)
-  } catch (e) {
-    return this.emit('error', new errors.EncodingError(e))
-  }
-  this.emit(this._dataEvent, value)
-}
-
-ReadStream.prototype._cleanup = function (err) {
-  if (err)
-    this.emit('error', err)
-
-  if (!this._state.canEnd())
-    return
-
-  this._state.end()
-  this.readable = false
-
-  this.emit('end')
-
-  if (this._iterator) {
-    var self = this
-    this._iterator.end(function () {
-      self._iterator = null
-      self.emit('close')
-    })
-  } else
-    this.emit('close')
-}
-
-ReadStream.prototype.toString = function () {
-  return 'LevelUP.ReadStream'
-}
-
-module.exports.create = function (options, db, iteratorFactory) {
-  return new ReadStream(options, db, iteratorFactory)
-}
-
-})(require("__browserify_Buffer").Buffer)
-},{"./errors":60,"./read-stream-state":62,"./util":64,"__browserify_Buffer":10,"simple-bufferstream":70,"stream":4,"util":5,"xtend":72}],64:[function(require,module,exports){
-(function(process,global){/* Copyright (c) 2012-2013 LevelUP contributors
- * See list at <https://github.com/rvagg/node-levelup#contributing>
- * MIT +no-false-attribs License
- * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
- */
-
-var extend = require('xtend')
-  , errors = require('./errors')
-  , bops   = require('bops')
-
-  , encodings = [
-        'hex'
-      , 'utf8'
-      , 'utf-8'
-      , 'ascii'
-      , 'binary'
-      , 'base64'
-      , 'ucs2'
-      , 'ucs-2'
-      , 'utf16le'
-      , 'utf-16le'
-    ]
-
-  , defaultOptions = {
-        createIfMissing : true
-      , errorIfExists   : false
-      , keyEncoding     : 'utf8'
-      , valueEncoding   : 'utf8'
-      , compression     : true
-    }
-
-  , leveldown
-
-  , toSlice = (function () {
-      var slicers = {}
-        , isBuffer = function (data) {
-            return data === undefined || data === null || bops.is(data)
+  function callHooks (isBatch, b, opts, cb) {
+    try {
+    b.forEach(function hook(e, i) {
+      prehooks.forEach(function (h) {
+        if(h.test(String(e.key))) {
+          //optimize this?
+          //maybe faster to not create a new object each time?
+          //have one object and expose scope to it?
+          var context = {
+            add: function (ch, db) {
+              if(typeof ch === 'undefined') {
+                return this
+              }
+              if(ch === false)
+                return delete b[i]
+              var prefix = (
+                getPrefix(ch.prefix) || 
+                getPrefix(db) || 
+                h.prefix || ''
+              )
+              ch.key = prefix + ch.key
+              if(h.test(String(ch.key))) {
+                //this usually means a stack overflow.
+                throw new Error('prehook cannot insert into own range')
+              }
+              b.push(ch)
+              hook(ch, b.length - 1)
+              return this
+            },
+            put: function (ch, db) {
+              if('object' === typeof ch) ch.type = 'put'
+              return this.add(ch, db)
+            },
+            del: function (ch, db) {
+              if('object' === typeof ch) ch.type = 'del'
+              return this.add(ch, db)
+            },
+            veto: function () {
+              return this.add(false)
+            }
           }
-      slicers.json = JSON.stringify
-      slicers.utf8 = function (data) {
-        return isBuffer(data) ? data : String(data)
-      }
-      encodings.forEach(function (enc) {
-        if (slicers[enc]) return
-        slicers[enc] = function (data) {
-          return isBuffer(data) ? data : bops.from(data, enc)
+          h.hook.call(context, e, context.add, b)
         }
       })
-      return slicers
-    }())
-
-  , toEncoding = (function () {
-      var encoders = {}
-      encoders.json = function (str) { return JSON.parse(str) }
-      encoders.utf8 = function (str) { return str }
-      encoders.binary = function (buffer) { return buffer }
-      encodings.forEach(function (enc) {
-        if (encoders[enc]) return
-        encoders[enc] = function (buffer) { return bops.to(buffer, enc) }
-      })
-      return encoders
-    }())
-
-  , copy = function (srcdb, dstdb, callback) {
-      srcdb.readStream()
-        .pipe(dstdb.writeStream())
-        .on('close', callback ? callback : function () {})
-        .on('error', callback ? callback : function (err) { throw err })
+    })
+    } catch (err) {
+      return (cb || opts)(err)
     }
+    b = b.filter(function (e) {
+      return e && e.type //filter out empty items
+    })
 
-  , setImmediate = global.setImmediate || process.nextTick
+    if(b.length == 1 && !isBatch) {
+      var change = b[0]
+      return change.type == 'put' 
+        ? put.call(db, change.key, change.value, opts, cb) 
+        : del.call(db, change.key, opts, cb)  
+    }
+    return batch.call(db, b, opts, cb)
+  }
 
-  , encodingOpts = (function () {
-      var eo = {}
-      encodings.forEach(function (e) {
-        eo[e] = { valueEncoding : e }
-      })
-      return eo
-    }())
+  db.put = function (key, value, opts, cb ) {
+    var batch = [{key: key, value: value, type: 'put'}]
+    return callHooks(false, batch, opts, cb)
+  }
 
-  , getOptions = function (levelup, options) {
-      var s = typeof options == 'string' // just an encoding
-      if (!s && options && options.encoding && !options.valueEncoding)
-        options.valueEncoding = options.encoding
-      return extend(
-          (levelup && levelup.options) || {}
-        , s ? encodingOpts[options] || encodingOpts[defaultOptions.valueEncoding]
-            : options
+  db.del = function (key, opts, cb) {
+    var batch = [{key: key, type: 'del'}]
+    return callHooks(false, batch, opts, cb)
+  }
+
+  db.batch = function (batch, opts, cb) {
+    return callHooks(true, batch, opts, cb)
+  }
+}
+
+},{"string-range":56}],56:[function(require,module,exports){
+
+//force to a valid range
+var range = exports.range = function (obj) {
+  return null == obj ? {} : 'string' === typeof range ? {
+      min: range, max: range + '\xff'
+    } :  obj
+}
+
+//turn into a sub range.
+var prefix = exports.prefix = function (range, within, term) {
+  range = exports.range(range)
+  var _range = {}
+  term = term || '\xff'
+  if(range instanceof RegExp || 'function' == typeof range) {
+    _range.min = within
+    _range.max   = within + term,
+    _range.inner = function (k) {
+      var j = k.substring(within.length)
+      if(range.test)
+        return range.test(j)
+      return range(j)
+    }
+  }
+  else if('object' === typeof range) {
+    _range.min = within + (range.min || range.start || '')
+    _range.max = within + (range.max || range.end   || (term || '~'))
+  }
+  return _range
+}
+
+//return a function that checks a range
+var checker = exports.checker = function (range) {
+  if(!range) range = {}
+
+  if ('string' === typeof range)
+    return function (key) {
+      return key.indexOf(range) == 0
+    }
+  else if(range instanceof RegExp)
+    return function (key) {
+      return range.test(key)
+    }
+  else if('object' === typeof range)
+    return function (key) {
+      var min = range.min || range.start
+      var max = range.max || range.end
+      return (
+        !min || key >= min
+      ) && (
+        !max || key <= max
+      ) && (
+        !range.inner || (
+          range.inner.test 
+            ? range.inner.test(key)
+            : range.inner(key)
+        )
       )
     }
-
-  , getLevelDOWN = function () {
-      if (leveldown)
-        return leveldown
-
-      var requiredVersion       = require('../package.json').devDependencies.leveldown
-        , missingLevelDOWNError = 'Could not locate LevelDOWN, try `npm install leveldown`'
-        , leveldownVersion
-
-      try {
-        leveldownVersion = require('leveldown/package').version
-      } catch (e) {
-        throw new errors.LevelUPError(missingLevelDOWNError)
-      }
-
-      if (!require('semver').satisfies(leveldownVersion, requiredVersion)) {
-        throw new errors.LevelUPError(
-            'Installed version of LevelDOWN ('
-          + leveldownVersion
-          + ') does not match required version ('
-          + requiredVersion
-          + ')'
-        )
-      }
-
-      try {
-        return leveldown = require('leveldown')
-      } catch (e) {
-        throw new errors.LevelUPError(missingLevelDOWNError)
-      }
-    }
-
-module.exports = {
-    defaultOptions : defaultOptions
-  , toSlice        : toSlice
-  , toEncoding     : toEncoding
-  , copy           : copy
-  , setImmediate   : setImmediate
-  , getOptions     : getOptions
-  , getLevelDOWN   : getLevelDOWN
+  else if('function' === typeof range)
+    return range
 }
-
-})(require("__browserify_process"),self)
-},{"../package.json":77,"./errors":60,"__browserify_process":11,"bops":43,"leveldown":9,"leveldown/package":9,"semver":9,"xtend":72}],65:[function(require,module,exports){
-/* Copyright (c) 2012-2013 LevelUP contributors
- * See list at <https://github.com/rvagg/node-levelup#contributing>
- * MIT +no-false-attribs License
- * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
- */
-
-var Stream       = require('stream').Stream
-  , inherits     = require('util').inherits
-  , extend       = require('xtend')
-  , concatStream = require('concat-stream')
-
-  , setImmediate = require('./util').setImmediate
-
-  , getOptions   = require('./util').getOptions
-
-  , defaultOptions = { type: 'put' }
-
-function WriteStream (options, db) {
-  Stream.call(this)
-  this._options = extend(defaultOptions, getOptions(db, options))
-  this._db      = db
-  this._buffer  = []
-  this._status  = 'init'
-  this._end     = false
-  this.writable = true
-  this.readable = false
-
-  var self = this
-  var ready = function () {
-    if (!self.writable)
-      return
-    self._status = 'ready'
-    self.emit('ready')
-    self._process()
-  }
-
-  if (db.isOpen())
-    setImmediate(ready)
-  else
-    db.once('ready', ready)
-}
-
-inherits(WriteStream, Stream)
-
-WriteStream.prototype.write = function (data) {
-  if (!this.writable)
-    return false
-  this._buffer.push(data)
-  if (this._status != 'init')
-    this._processDelayed()
-  if (this._options.maxBufferLength &&
-      this._buffer.length > this._options.maxBufferLength) {
-    this._writeBlock = true
-    return false
-  }
-  return true
-}
-
-WriteStream.prototype.end = function (data) {
-  var self = this
-  if (data)
-    this.write(data)
-  setImmediate(function () {
-    self._end = true
-    self._process()
-  })
-}
-
-WriteStream.prototype.destroy = function () {
-  this.writable = false
-  this.end()
-}
-
-WriteStream.prototype.destroySoon = function () {
-  this.end()
-}
-
-WriteStream.prototype.add = function (entry) {
-  if (!entry.props)
-    return
-  if (entry.props.Directory)
-    entry.pipe(this._db.writeStream(this._options))
-  else if (entry.props.File || entry.File || entry.type == 'File')
-    this._write(entry)
-  return true
-}
-
-WriteStream.prototype._processDelayed = function () {
-  var self = this
-  setImmediate(function () {
-    self._process()
-  })
-}
-
-WriteStream.prototype._process = function () {
-  var buffer
-    , self = this
-
-    , cb = function (err) {
-        if (!self.writable)
-          return
-        if (self._status != 'closed')
-          self._status = 'ready'
-        if (err) {
-          self.writable = false
-          return self.emit('error', err)
-        }
-        self._process()
-      }
-
-  if (self._status != 'ready' && self.writable) {
-    if (self._buffer.length && self._status != 'closed')
-      self._processDelayed()
-    return
-  }
-
-  if (self._buffer.length && self.writable) {
-    self._status = 'writing'
-    buffer       = self._buffer
-    self._buffer = []
-
-    self._db.batch(buffer.map(function (d) {
-      return {
-          type          : d.type || self._options.type
-        , key           : d.key
-        , value         : d.value
-        , keyEncoding   : d.keyEncoding || self._options.keyEncoding
-        , valueEncoding : d.valueEncoding
-            || d.encoding
-            || self._options.valueEncoding
-      }
-    }), cb)
-
-    if (self._writeBlock) {
-      self._writeBlock = false
-      self.emit('drain')
-    }
-
-    // don't allow close until callback has returned
-    return
-  }
-
-  if (self._end && self._status != 'closed') {
-    self._status  = 'closed'
-    self.writable = false
-    self.emit('close')
-  }
-}
-
-WriteStream.prototype._write = function (entry) {
-  var key = entry.path || entry.props.path
-    , self = this
-
-  if (!key)
-    return
-
-  entry.pipe(concatStream(function (err, data) {
-    if (err) {
-      self.writable = false
-      return self.emit('error', err)
-    }
-
-    if (self._options.fstreamRoot &&
-        key.indexOf(self._options.fstreamRoot) > -1)
-      key = key.substr(self._options.fstreamRoot.length + 1)
-
-    self.write({ key: key, value: data })
-  }))
-}
-
-WriteStream.prototype.toString = function () {
-  return 'LevelUP.WriteStream'
-}
-
-module.exports.create = function (options, db) {
-  return new WriteStream(options, db)
-}
-
-},{"./util":64,"concat-stream":66,"stream":4,"util":5,"xtend":72}],66:[function(require,module,exports){
-(function(Buffer){var stream = require('stream')
-var util = require('util')
-
-function ConcatStream(cb) {
-  stream.Stream.call(this)
-  this.writable = true
-  if (cb) this.cb = cb
-  this.body = []
-  this.on('error', function(err) {
-    if (this.cb) this.cb(err)
-  })
-}
-
-util.inherits(ConcatStream, stream.Stream)
-
-ConcatStream.prototype.write = function(chunk) {
-  this.body.push(chunk)
-}
-
-ConcatStream.prototype.destroy = function() {}
-
-ConcatStream.prototype.arrayConcat = function(arrs) {
-  if (arrs.length === 0) return []
-  if (arrs.length === 1) return arrs[0]
-  return arrs.reduce(function (a, b) { return a.concat(b) })
-}
-
-ConcatStream.prototype.isArray = function(arr) {
-  return Array.isArray(arr)
-}
-
-ConcatStream.prototype.getBody = function () {
-  if (this.body.length === 0) return
-  if (typeof(this.body[0]) === "string") return this.body.join('')
-  if (this.isArray(this.body[0])) return this.arrayConcat(this.body)
-  if (typeof(Buffer) !== "undefined" && Buffer.isBuffer(this.body[0])) {
-    return Buffer.concat(this.body)
-  }
-  return this.body
-}
-
-ConcatStream.prototype.end = function() {
-  if (this.cb) this.cb(false, this.getBody())
-}
-
-module.exports = function(cb) {
-  return new ConcatStream(cb)
-}
-
-module.exports.ConcatStream = ConcatStream
-
-})(require("__browserify_Buffer").Buffer)
-},{"__browserify_Buffer":10,"stream":4,"util":5}],67:[function(require,module,exports){
-function init (name, message, cause) {
-  this.name      = name
-  // can be passed just a 'cause'
-  this.cause     = typeof message != 'string' ? message : cause
-  this.message   = !!message && typeof message != 'string' ? message.message : message
-}
-
-// generic prototype, not intended to be actually used - helpful for `instanceof`
-function CustomError (message, cause) {
-  Error.call(this)
-  if (Error.captureStackTrace)
-    Error.captureStackTrace(this, arguments.callee)
-  init.call(this, 'CustomError', message, cause)
-}
-
-CustomError.prototype = new Error()
-
-function createError (errno, name, proto) {
-  var err = function (message, cause) {
-    init.call(this, name, message, cause)
-    //TODO: the specificity here is stupid, errno should be available everywhere
-    if (name == 'FilesystemError') {
-      this.code    = this.cause.code
-      this.path    = this.cause.path
-      this.errno   = this.cause.errno
-      this.message =
-        (errno.errno[this.cause.errno]
-          ? errno.errno[this.cause.errno].description
-          : this.cause.message)
-        + (this.cause.path ? ' [' + this.cause.path + ']' : '')
-    }
-    Error.call(this)
-    if (Error.captureStackTrace)
-      Error.captureStackTrace(this, arguments.callee)
-  }
-  err.prototype = !!proto ? new proto() : new CustomError()
-  return err
-}
-
-module.exports = function (errno) {
-  var ce = function (name, proto) {
-    return createError(errno, name, proto)
-  }
-  return {
-      CustomError     : CustomError
-    , FilesystemError : ce('FilesystemError')
-    , createError     : ce
-  }
-}
-
-},{}],68:[function(require,module,exports){
-(function(){var all = module.exports.all = [
- {
-  "errno": -1,
-  "code": "UNKNOWN",
-  "description": "unknown error"
- },
- {
-  "errno": 0,
-  "code": "OK",
-  "description": "success"
- },
- {
-  "errno": 1,
-  "code": "EOF",
-  "description": "end of file"
- },
- {
-  "errno": 2,
-  "code": "EADDRINFO",
-  "description": "getaddrinfo error"
- },
- {
-  "errno": 3,
-  "code": "EACCES",
-  "description": "permission denied"
- },
- {
-  "errno": 4,
-  "code": "EAGAIN",
-  "description": "resource temporarily unavailable"
- },
- {
-  "errno": 5,
-  "code": "EADDRINUSE",
-  "description": "address already in use"
- },
- {
-  "errno": 6,
-  "code": "EADDRNOTAVAIL",
-  "description": "address not available"
- },
- {
-  "errno": 7,
-  "code": "EAFNOSUPPORT",
-  "description": "address family not supported"
- },
- {
-  "errno": 8,
-  "code": "EALREADY",
-  "description": "connection already in progress"
- },
- {
-  "errno": 9,
-  "code": "EBADF",
-  "description": "bad file descriptor"
- },
- {
-  "errno": 10,
-  "code": "EBUSY",
-  "description": "resource busy or locked"
- },
- {
-  "errno": 11,
-  "code": "ECONNABORTED",
-  "description": "software caused connection abort"
- },
- {
-  "errno": 12,
-  "code": "ECONNREFUSED",
-  "description": "connection refused"
- },
- {
-  "errno": 13,
-  "code": "ECONNRESET",
-  "description": "connection reset by peer"
- },
- {
-  "errno": 14,
-  "code": "EDESTADDRREQ",
-  "description": "destination address required"
- },
- {
-  "errno": 15,
-  "code": "EFAULT",
-  "description": "bad address in system call argument"
- },
- {
-  "errno": 16,
-  "code": "EHOSTUNREACH",
-  "description": "host is unreachable"
- },
- {
-  "errno": 17,
-  "code": "EINTR",
-  "description": "interrupted system call"
- },
- {
-  "errno": 18,
-  "code": "EINVAL",
-  "description": "invalid argument"
- },
- {
-  "errno": 19,
-  "code": "EISCONN",
-  "description": "socket is already connected"
- },
- {
-  "errno": 20,
-  "code": "EMFILE",
-  "description": "too many open files"
- },
- {
-  "errno": 21,
-  "code": "EMSGSIZE",
-  "description": "message too long"
- },
- {
-  "errno": 22,
-  "code": "ENETDOWN",
-  "description": "network is down"
- },
- {
-  "errno": 23,
-  "code": "ENETUNREACH",
-  "description": "network is unreachable"
- },
- {
-  "errno": 24,
-  "code": "ENFILE",
-  "description": "file table overflow"
- },
- {
-  "errno": 25,
-  "code": "ENOBUFS",
-  "description": "no buffer space available"
- },
- {
-  "errno": 26,
-  "code": "ENOMEM",
-  "description": "not enough memory"
- },
- {
-  "errno": 27,
-  "code": "ENOTDIR",
-  "description": "not a directory"
- },
- {
-  "errno": 28,
-  "code": "EISDIR",
-  "description": "illegal operation on a directory"
- },
- {
-  "errno": 29,
-  "code": "ENONET",
-  "description": "machine is not on the network"
- },
- {
-  "errno": 31,
-  "code": "ENOTCONN",
-  "description": "socket is not connected"
- },
- {
-  "errno": 32,
-  "code": "ENOTSOCK",
-  "description": "socket operation on non-socket"
- },
- {
-  "errno": 33,
-  "code": "ENOTSUP",
-  "description": "operation not supported on socket"
- },
- {
-  "errno": 34,
-  "code": "ENOENT",
-  "description": "no such file or directory"
- },
- {
-  "errno": 35,
-  "code": "ENOSYS",
-  "description": "function not implemented"
- },
- {
-  "errno": 36,
-  "code": "EPIPE",
-  "description": "broken pipe"
- },
- {
-  "errno": 37,
-  "code": "EPROTO",
-  "description": "protocol error"
- },
- {
-  "errno": 38,
-  "code": "EPROTONOSUPPORT",
-  "description": "protocol not supported"
- },
- {
-  "errno": 39,
-  "code": "EPROTOTYPE",
-  "description": "protocol wrong type for socket"
- },
- {
-  "errno": 40,
-  "code": "ETIMEDOUT",
-  "description": "connection timed out"
- },
- {
-  "errno": 41,
-  "code": "ECHARSET",
-  "description": "invalid Unicode character"
- },
- {
-  "errno": 42,
-  "code": "EAIFAMNOSUPPORT",
-  "description": "address family for hostname not supported"
- },
- {
-  "errno": 44,
-  "code": "EAISERVICE",
-  "description": "servname not supported for ai_socktype"
- },
- {
-  "errno": 45,
-  "code": "EAISOCKTYPE",
-  "description": "ai_socktype not supported"
- },
- {
-  "errno": 46,
-  "code": "ESHUTDOWN",
-  "description": "cannot send after transport endpoint shutdown"
- },
- {
-  "errno": 47,
-  "code": "EEXIST",
-  "description": "file already exists"
- },
- {
-  "errno": 48,
-  "code": "ESRCH",
-  "description": "no such process"
- },
- {
-  "errno": 49,
-  "code": "ENAMETOOLONG",
-  "description": "name too long"
- },
- {
-  "errno": 50,
-  "code": "EPERM",
-  "description": "operation not permitted"
- },
- {
-  "errno": 51,
-  "code": "ELOOP",
-  "description": "too many symbolic links encountered"
- },
- {
-  "errno": 52,
-  "code": "EXDEV",
-  "description": "cross-device link not permitted"
- },
- {
-  "errno": 53,
-  "code": "ENOTEMPTY",
-  "description": "directory not empty"
- },
- {
-  "errno": 54,
-  "code": "ENOSPC",
-  "description": "no space left on device"
- },
- {
-  "errno": 55,
-  "code": "EIO",
-  "description": "i/o error"
- },
- {
-  "errno": 56,
-  "code": "EROFS",
-  "description": "read-only file system"
- },
- {
-  "errno": 57,
-  "code": "ENODEV",
-  "description": "no such device"
- },
- {
-  "errno": 58,
-  "code": "ESPIPE",
-  "description": "invalid seek"
- },
- {
-  "errno": 59,
-  "code": "ECANCELED",
-  "description": "operation canceled"
- }
-]
-
-
-module.exports.errno = {
-    '-1': all[0]
-  , '0': all[1]
-  , '1': all[2]
-  , '2': all[3]
-  , '3': all[4]
-  , '4': all[5]
-  , '5': all[6]
-  , '6': all[7]
-  , '7': all[8]
-  , '8': all[9]
-  , '9': all[10]
-  , '10': all[11]
-  , '11': all[12]
-  , '12': all[13]
-  , '13': all[14]
-  , '14': all[15]
-  , '15': all[16]
-  , '16': all[17]
-  , '17': all[18]
-  , '18': all[19]
-  , '19': all[20]
-  , '20': all[21]
-  , '21': all[22]
-  , '22': all[23]
-  , '23': all[24]
-  , '24': all[25]
-  , '25': all[26]
-  , '26': all[27]
-  , '27': all[28]
-  , '28': all[29]
-  , '29': all[30]
-  , '31': all[31]
-  , '32': all[32]
-  , '33': all[33]
-  , '34': all[34]
-  , '35': all[35]
-  , '36': all[36]
-  , '37': all[37]
-  , '38': all[38]
-  , '39': all[39]
-  , '40': all[40]
-  , '41': all[41]
-  , '42': all[42]
-  , '44': all[43]
-  , '45': all[44]
-  , '46': all[45]
-  , '47': all[46]
-  , '48': all[47]
-  , '49': all[48]
-  , '50': all[49]
-  , '51': all[50]
-  , '52': all[51]
-  , '53': all[52]
-  , '54': all[53]
-  , '55': all[54]
-  , '56': all[55]
-  , '57': all[56]
-  , '58': all[57]
-  , '59': all[58]
+//check if a key is within a range.
+var satifies = exports.satisfies = function (key, range) {
+  return checker(range)(key)
 }
 
 
-module.exports.code = {
-    'UNKNOWN': all[0]
-  , 'OK': all[1]
-  , 'EOF': all[2]
-  , 'EADDRINFO': all[3]
-  , 'EACCES': all[4]
-  , 'EAGAIN': all[5]
-  , 'EADDRINUSE': all[6]
-  , 'EADDRNOTAVAIL': all[7]
-  , 'EAFNOSUPPORT': all[8]
-  , 'EALREADY': all[9]
-  , 'EBADF': all[10]
-  , 'EBUSY': all[11]
-  , 'ECONNABORTED': all[12]
-  , 'ECONNREFUSED': all[13]
-  , 'ECONNRESET': all[14]
-  , 'EDESTADDRREQ': all[15]
-  , 'EFAULT': all[16]
-  , 'EHOSTUNREACH': all[17]
-  , 'EINTR': all[18]
-  , 'EINVAL': all[19]
-  , 'EISCONN': all[20]
-  , 'EMFILE': all[21]
-  , 'EMSGSIZE': all[22]
-  , 'ENETDOWN': all[23]
-  , 'ENETUNREACH': all[24]
-  , 'ENFILE': all[25]
-  , 'ENOBUFS': all[26]
-  , 'ENOMEM': all[27]
-  , 'ENOTDIR': all[28]
-  , 'EISDIR': all[29]
-  , 'ENONET': all[30]
-  , 'ENOTCONN': all[31]
-  , 'ENOTSOCK': all[32]
-  , 'ENOTSUP': all[33]
-  , 'ENOENT': all[34]
-  , 'ENOSYS': all[35]
-  , 'EPIPE': all[36]
-  , 'EPROTO': all[37]
-  , 'EPROTONOSUPPORT': all[38]
-  , 'EPROTOTYPE': all[39]
-  , 'ETIMEDOUT': all[40]
-  , 'ECHARSET': all[41]
-  , 'EAIFAMNOSUPPORT': all[42]
-  , 'EAISERVICE': all[43]
-  , 'EAISOCKTYPE': all[44]
-  , 'ESHUTDOWN': all[45]
-  , 'EEXIST': all[46]
-  , 'ESRCH': all[47]
-  , 'ENAMETOOLONG': all[48]
-  , 'EPERM': all[49]
-  , 'ELOOP': all[50]
-  , 'EXDEV': all[51]
-  , 'ENOTEMPTY': all[52]
-  , 'ENOSPC': all[53]
-  , 'EIO': all[54]
-  , 'EROFS': all[55]
-  , 'ENODEV': all[56]
-  , 'ESPIPE': all[57]
-  , 'ECANCELED': all[58]
-}
 
-
-module.exports.custom = require("./custom")(module.exports)
-
-})()
-},{"./custom":67}],69:[function(require,module,exports){
-/*!
-  * prr
-  * (c) 2013 Rod Vagg <rod@vagg.org>
-  * https://github.com/rvagg/prr
-  * License: MIT
-  */
-
-(function (name, context, definition) {
-  if (typeof module != 'undefined' && module.exports)
-    module.exports = definition()
-  else
-    context[name] = definition()
-})('prr', this, function() {
-
-  var setProperty = typeof Object.defineProperty == 'function'
-      ? function (obj, key, options) {
-          Object.defineProperty(obj, key, options)
-          return obj
-        }
-      : function (obj, key, options) { // < es5
-          obj[key] = options.value
-          return obj
-        }
-
-    , makeOptions = function (value, options) {
-        var oo = typeof options == 'object'
-          , os = !oo && typeof options == 'string'
-          , op = function (p) {
-              return oo
-                ? !!options[p]
-                : os
-                  ? options.indexOf(p[0]) > -1
-                  : false
-            }
-
-        return {
-            enumerable   : op('enumerable')
-          , configurable : op('configurable')
-          , writable     : op('writable')
-          , value        : value
-        }
-      }
-
-    , prr = function (obj, key, value, options) {
-        var k
-
-        options = makeOptions(value, options)
-
-        if (typeof key == 'object') {
-          for (k in key) {
-            if (Object.hasOwnProperty.call(key, k)) {
-              options.value = key[k]
-              setProperty(obj, k, options)
-            }
-          }
-          return obj
-        }
-
-        return setProperty(obj, key, options)
-      }
-
-  return prr
-})
-},{}],70:[function(require,module,exports){
-(function(process){const stream = require('stream')
-    , util   = require('util')
-
-var SimpleBufferStream = function (buffer) {
-  var self = this
-  stream.Stream.call(self)
-  self._state  = 'ready'
-  self._buffer = buffer
-  process.nextTick(function () {
-    self._dump()
-  })
-}
-
-util.inherits(SimpleBufferStream, stream.Stream)
-
-SimpleBufferStream.prototype._dump = function() {
-  if (this._state != 'ready')
-    return
-
-  this._state = 'done'
-  this.emit('data', this._buffer)
-  this.emit('end')
-  this.emit('close')
-}
-
-SimpleBufferStream.prototype.pause = function() {
-  if (this._state != 'done')
-    this._state = 'paused'
-}
-SimpleBufferStream.prototype.resume = function() {
-  if (this._state == 'done')
-    return
-  this._state = 'ready'
-  this._dump()
-}
-
-SimpleBufferStream.prototype.destroy = function() {}
-
-module.exports = function (buffer) {
-  return new SimpleBufferStream(buffer)
-}
-
-})(require("__browserify_process"))
-},{"__browserify_process":11,"stream":4,"util":5}],71:[function(require,module,exports){
-module.exports = hasKeys
-
-function hasKeys(source) {
-    return source !== null &&
-        (typeof source === "object" ||
-        typeof source === "function")
-}
-
-},{}],72:[function(require,module,exports){
+},{}],57:[function(require,module,exports){
 var Keys = require("object-keys")
-var hasKeys = require("./has-keys")
+var isObject = require("is-object")
 
 module.exports = extend
 
@@ -16069,7 +14527,7 @@ function extend() {
     for (var i = 0; i < arguments.length; i++) {
         var source = arguments[i]
 
-        if (!hasKeys(source)) {
+        if (!isObject(source)) {
             continue
         }
 
@@ -16084,11 +14542,18 @@ function extend() {
     return target
 }
 
-},{"./has-keys":71,"object-keys":73}],73:[function(require,module,exports){
+},{"is-object":58,"object-keys":59}],58:[function(require,module,exports){
+module.exports = isObject
+
+function isObject(x) {
+    return typeof x === "object" && x !== null
+}
+
+},{}],59:[function(require,module,exports){
 module.exports = Object.keys || require('./shim');
 
 
-},{"./shim":76}],74:[function(require,module,exports){
+},{"./shim":62}],60:[function(require,module,exports){
 
 var hasOwn = Object.prototype.hasOwnProperty;
 
@@ -16111,7 +14576,7 @@ module.exports = function forEach (obj, fn, ctx) {
 };
 
 
-},{}],75:[function(require,module,exports){
+},{}],61:[function(require,module,exports){
 
 /**!
  * is
@@ -16815,7 +15280,7 @@ is.string = function (value) {
 };
 
 
-},{}],76:[function(require,module,exports){
+},{}],62:[function(require,module,exports){
 (function () {
 	"use strict";
 
@@ -16861,7 +15326,2725 @@ is.string = function (value) {
 }());
 
 
-},{"foreach":74,"is":75}],77:[function(require,module,exports){
+},{"foreach":60,"is":61}],63:[function(require,module,exports){
+var EventEmitter = require('events').EventEmitter
+var inherits     = require('util').inherits
+var ranges       = require('string-range')
+var fixRange     = require('level-fix-range')
+var xtend        = require('xtend')
+
+inherits(SubDB, EventEmitter)
+
+function SubDB (db, prefix, options) {
+  if('string' === typeof options) {
+    console.error('db.sublevel(name, seperator<string>) is depreciated')
+    console.error('use db.sublevel(name, {sep: separator})) if you must')
+    options = {sep: options}
+  }
+  if(!(this instanceof SubDB)) return new SubDB(db, prefix, options)
+  if(!db)     throw new Error('must provide db')
+  if(!prefix) throw new Error('must provide prefix')
+
+  options = options || {}
+  options.sep = options.sep || '\xff'
+  
+  this._parent = db
+  this._options = options
+  this._prefix = prefix
+  this._root = root(this)
+  db.sublevels[prefix] = this
+  this.sublevels = {}
+  this.methods = {}
+  var self = this
+  this.hooks = {
+    pre: function () {
+      return self.pre.apply(self, arguments)
+    },
+    post: function () {
+      return self.post.apply(self, arguments)
+    }
+  }
+}
+
+var SDB = SubDB.prototype
+
+SDB._key = function (key) {
+  var sep = this._options.sep
+  return sep
+    + this._prefix 
+    + sep
+    + key
+}
+
+SDB._getOptsAndCb = function (opts, cb) {
+  if (typeof opts == 'function') { 
+    cb = opts
+    opts = {}
+  }
+  return { opts: xtend(opts, this._options), cb: cb }
+}
+
+SDB.sublevel = function (prefix, options) {
+  if(this.sublevels[prefix])
+    return this.sublevels[prefix]
+  return new SubDB(this, prefix, options || this._options)
+}
+
+SDB.put = function (key, value, opts, cb) {
+  var res = this._getOptsAndCb(opts, cb)
+  this._root.put(this.prefix(key), value, res.opts, res.cb)
+}
+
+SDB.get = function (key, opts, cb) {
+  var res = this._getOptsAndCb(opts, cb)
+  this._root.get(this.prefix(key), res.opts, res.cb)
+}
+
+SDB.del = function (key, opts, cb) {
+  var res = this._getOptsAndCb(opts, cb)
+  this._root.del(this.prefix(key), res.opts, res.cb)
+}
+
+SDB.batch = function (changes, opts, cb) {
+  var self = this
+  changes.forEach(function (ch) {
+    //OH YEAH, WE NEED TO VALIDATE THAT UPDATING THIS KEY/PREFIX IS ALLOWED
+    if('string' === typeof ch.prefix) {
+      ch.key = ch.prefix + ch.key
+    } else
+    ch.key = (ch.prefix || self).prefix(ch.key)
+    if(ch.prefix) ch.prefix = null
+  })
+  this._root.batch(changes, opts, cb)
+}
+
+SDB.prefix = function (key) {
+  var sep = this._options.sep
+  return this._parent.prefix() + sep + this._prefix + sep + (key || '')
+}
+
+SDB.keyStream =
+SDB.createKeyStream = function (opts) {
+  opts = opts || {}
+  opts.keys = true
+  opts.values = false
+  return this.createReadStream(opts)
+}
+
+SDB.valueStream =
+SDB.createValueStream = function (opts) {
+  opts = opts || {}
+  opts.keys = false
+  opts.values = true
+  opts.keys = false
+  return this.createReadStream(opts)
+}
+
+function selectivelyMerge(_opts, opts) {
+  [ 'valueEncoding'
+  , 'encoding'
+  , 'keyEncoding'
+  , 'reverse'
+  , 'values'
+  , 'keys'
+  , 'limit'
+  , 'fillCache'
+  ]
+  .forEach(function (k) {
+    if (opts.hasOwnProperty(k)) _opts[k] = opts[k]        
+  })
+}
+
+SDB.readStream = 
+SDB.createReadStream = function (opts) {
+  opts = opts || {}
+  var r = root(this)
+  var p = this.prefix()
+
+  var _opts = ranges.prefix(opts, p)
+  selectivelyMerge(_opts, xtend(opts, this._options))
+
+  var s = r.createReadStream(_opts)
+
+  if(_opts.values === false) {
+    var emit = s.emit
+    s.emit = function (event, val) {
+      if(event === 'data') {
+        emit.call(this, 'data', val.substring(p.length))
+      } else
+        emit.call(this, event, val)
+    }
+    return s
+  } else if(_opts.keys === false)
+    return s
+  else
+    return s.on('data', function (d) {
+      //mutate the prefix!
+      //this doesn't work for createKeyStream admittedly.
+      d.key = d.key.substring(p.length)
+    })
+}
+
+
+SDB.writeStream =
+SDB.createWriteStream = function () {
+  var r = root(this)
+  var p = this.prefix()
+  var ws = r.createWriteStream.apply(r, arguments)
+  var write = ws.write
+
+  var encoding = this._options.encoding
+  var valueEncoding = this._options.valueEncoding
+  var keyEncoding = this._options.keyEncoding
+
+  // slight optimization, if no encoding was specified at all,
+  // which will be the case most times, make write not check at all
+  var nocheck = !encoding && !valueEncoding && !keyEncoding
+
+  ws.write = nocheck 
+    ? function (data) {
+        data.key = p + data.key
+        return write.call(ws, data)
+      }
+    : function (data) {
+        data.key = p + data.key
+        
+        // not merging all options here since this happens on every write and things could get slowed down
+        // at this point we only consider encoding important to propagate
+        if (encoding && typeof data.encoding === 'undefined') data.encoding = encoding
+        if (valueEncoding && typeof data.valueEncoding === 'undefined') data.valueEncoding = valueEncoding
+        if (keyEncoding && typeof data.keyEncoding === 'undefined') data.keyEncoding = keyEncoding
+
+        return write.call(ws, data)
+      }
+  return ws
+}
+
+SDB.approximateSize = function () {
+  var r = root(db)
+  return r.approximateSize.apply(r, arguments)
+}
+
+function root(db) {
+  if(!db._parent) return db
+  return root(db._parent)
+}
+
+SDB.pre = function (range, hook) {
+  if(!hook) hook = range, range = null
+  range = ranges.prefix(range, this.prefix(), this._options.sep)
+  var r = root(this._parent)
+  var p = this.prefix()
+  return r.hooks.pre(fixRange(range), function (ch, add) {
+    hook({
+      key: ch.key.substring(p.length),
+      value: ch.value,
+      type: ch.type
+    }, function (ch, _p) {
+      //maybe remove the second add arg now
+      //that op can have prefix?
+      add(ch, ch.prefix ? _p : (_p || p))
+    })
+  })
+}
+
+SDB.post = function (range, hook) {
+  if(!hook) hook = range, range = null
+  var r = root(this._parent)
+  var p = this.prefix()
+  range = ranges.prefix(range, p, this._options.sep)
+  return r.hooks.post(fixRange(range), function (data) {
+    hook({key: data.key.substring(p.length), value: data.value, type: data.type})
+  })
+}
+
+var exports = module.exports = SubDB
+
+
+},{"events":3,"level-fix-range":54,"string-range":56,"util":5,"xtend":57}],64:[function(require,module,exports){
+/* Copyright (c) 2012-2013 LevelUP contributors
+ * See list at <https://github.com/rvagg/node-levelup#contributing>
+ * MIT +no-false-attribs License
+ * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
+ */
+
+var createError  = require('errno').custom.createError
+  , LevelUPError = createError('LevelUPError')
+
+module.exports = {
+    LevelUPError        : LevelUPError
+  , InitializationError : createError('InitializationError', LevelUPError)
+  , OpenError           : createError('OpenError', LevelUPError)
+  , ReadError           : createError('ReadError', LevelUPError)
+  , WriteError          : createError('WriteError', LevelUPError)
+  , NotFoundError       : createError('NotFoundError', LevelUPError)
+  , EncodingError       : createError('EncodingError', LevelUPError)
+}
+
+},{"errno":72}],65:[function(require,module,exports){
+(function(process){/* Copyright (c) 2012-2013 LevelUP contributors
+ * See list at <https://github.com/rvagg/node-levelup#contributing>
+ * MIT +no-false-attribs License
+ * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
+ */
+
+var EventEmitter   = require('events').EventEmitter
+  , inherits       = require('util').inherits
+  , extend         = require('xtend')
+  , prr            = require('prr')
+
+  , errors         = require('./errors')
+  , readStream     = require('./read-stream')
+  , writeStream    = require('./write-stream')
+  , util           = require('./util')
+
+  , toEncoding     = util.toEncoding
+  , toSlice        = util.toSlice
+  , getOptions     = util.getOptions
+  , defaultOptions = util.defaultOptions
+  , getLevelDOWN   = util.getLevelDOWN
+
+
+  , createLevelUP = function (location, options, callback) {
+
+      // Possible status values:
+      //  - 'new'     - newly created, not opened or closed
+      //  - 'opening' - waiting for the database to be opened, post open()
+      //  - 'open'    - successfully opened the database, available for use
+      //  - 'closing' - waiting for the database to be closed, post close()
+      //  - 'closed'  - database has been successfully closed, should not be
+      //                 used except for another open() operation
+
+      var status = 'new'
+        , error
+        , levelup
+
+        , isOpen        = function () { return status == 'open' }
+        , isOpening     = function () { return status == 'opening' }
+
+        , dispatchError = function (error, callback) {
+            return typeof callback == 'function'
+              ? callback(error)
+              : levelup.emit('error', error)
+          }
+
+        , getCallback = function (options, callback) {
+            return typeof options == 'function' ? options : callback
+          }
+
+        , deferred = [ 'get', 'put', 'batch', 'del', 'approximateSize' ]
+            .reduce(function (o, method) {
+              o[method] = function () {
+                var args = Array.prototype.slice.call(arguments)
+                levelup.once('ready', function () {
+                  levelup.db[method].apply(levelup.db, args)
+                })
+              }
+              return o
+            }, {})
+
+      if (typeof options == 'function') {
+        callback = options
+        options  = {}
+      }
+
+      options = getOptions(levelup, options)
+
+      if (typeof location != 'string') {
+        error = new errors.InitializationError(
+            'Must provide a location for the database')
+        if (callback)
+          return callback(error)
+        throw error
+      }
+
+      function LevelUP (location, options) {
+        EventEmitter.call(this)
+        this.setMaxListeners(Infinity)
+
+        this.options = extend(defaultOptions, options)
+        // set this.location as enumerable but not configurable or writable
+        prr(this, 'location', location, 'e')
+      }
+
+      inherits(LevelUP, EventEmitter)
+
+      LevelUP.prototype.open = function (callback) {
+        var self = this
+        if (isOpen()) {
+          if (callback) {
+            process.nextTick(function () { callback(null, self) })
+          }
+          return self
+        }
+
+        if (isOpening()) {
+          return callback && levelup.once(
+              'open'
+            , function () { callback(null, self) }
+          )
+        }
+
+        levelup.emit('opening')
+
+        status = 'opening'
+        self.db = deferred
+
+        var dbFactory = levelup.options.db || getLevelDOWN()
+          , db        = dbFactory(levelup.location)
+
+        db.open(levelup.options, function (err) {
+          if (err) {
+            err = new errors.OpenError(err)
+            return dispatchError(err, callback)
+          } else {
+            levelup.db = db
+            status = 'open'
+            if (callback)
+              callback(null, levelup)
+            levelup.emit('open')
+            levelup.emit('ready')
+          }
+        })
+      }
+
+      LevelUP.prototype.close = function (callback) {
+        if (isOpen()) {
+          status = 'closing'
+          this.db.close(function () {
+            status = 'closed'
+            levelup.emit('closed')
+            if (callback)
+              callback.apply(null, arguments)
+          })
+          levelup.emit('closing')
+          this.db = null
+        } else if (status == 'closed' && callback) {
+          callback()
+        } else if (status == 'closing' && callback) {
+          levelup.once('closed', callback)
+        } else if (isOpening()) {
+          levelup.once('open', function () {
+            levelup.close(callback)
+          })
+        }
+      }
+
+      LevelUP.prototype.isOpen = function () { return isOpen() }
+
+      LevelUP.prototype.isClosed = function () { return (/^clos/).test(status) }
+
+      LevelUP.prototype.get = function (key_, options, callback) {
+        var key
+          , valueEnc
+          , err
+
+        callback = getCallback(options, callback)
+
+        if (typeof callback != 'function') {
+          err = new errors.ReadError('get() requires key and callback arguments')
+          return dispatchError(err)
+        }
+
+        if (!isOpening() && !isOpen()) {
+          err = new errors.ReadError('Database is not open')
+          return dispatchError(err, callback)
+        }
+
+        options  = getOptions(levelup, options)
+        key      = toSlice[options.keyEncoding](key_)
+        valueEnc = options.valueEncoding
+        options.asBuffer = valueEnc != 'utf8' && valueEnc != 'json'
+
+        this.db.get(key, options, function (err, value) {
+          if (err) {
+            if ((/notfound/i).test(err)) {
+              err = new errors.NotFoundError(
+                  'Key not found in database [' + key_ + ']', err)
+            } else {
+              err = new errors.ReadError(err)
+            }
+            return dispatchError(err, callback)
+          }
+          if (callback) {
+            try {
+              value = toEncoding[valueEnc](value)
+            } catch (e) {
+              return callback(new errors.EncodingError(e))
+            }
+            callback(null, value)
+          }
+        })
+      }
+
+      LevelUP.prototype.put = function (key_, value_, options, callback) {
+        var err
+          , key
+          , value
+
+        callback = getCallback(options, callback)
+
+        if (key_ === null || key_ === undefined
+              || value_ === null || value_ === undefined) {
+          err = new errors.WriteError('put() requires key and value arguments')
+          return dispatchError(err, callback)
+        }
+
+        if (!isOpening() && !isOpen()) {
+          err = new errors.WriteError('Database is not open')
+          return dispatchError(err, callback)
+        }
+
+        options = getOptions(levelup, options)
+        key     = toSlice[options.keyEncoding](key_)
+        value   = toSlice[options.valueEncoding](value_)
+
+        this.db.put(key, value, options, function (err) {
+          if (err) {
+            err = new errors.WriteError(err)
+            return dispatchError(err, callback)
+          } else {
+            levelup.emit('put', key_, value_)
+            if (callback)
+              callback()
+          }
+        })
+      }
+
+      LevelUP.prototype.del = function (key_, options, callback) {
+        var err
+          , key
+
+        callback = getCallback(options, callback)
+
+        if (key_ === null || key_ === undefined) {
+          err = new errors.WriteError('del() requires a key argument')
+          return dispatchError(err, callback)
+        }
+
+        if (!isOpening() && !isOpen()) {
+          err = new errors.WriteError('Database is not open')
+          return dispatchError(err, callback)
+        }
+
+        options = getOptions(levelup, options)
+        key     = toSlice[options.keyEncoding](key_)
+
+        this.db.del(key, options, function (err) {
+          if (err) {
+            err = new errors.WriteError(err)
+            return dispatchError(err, callback)
+          } else {
+            levelup.emit('del', key_)
+            if (callback)
+              callback()
+          }
+        })
+      }
+
+      function Batch (db) {
+        this.batch = db.batch()
+        this.ops = []
+      }
+
+      Batch.prototype.put = function (key, value, options) {
+        options = getOptions(levelup, options)
+
+        if (key)
+          key = toSlice[options.keyEncoding](key)
+        if (value)
+          value = toSlice[options.valueEncoding](value)
+
+        try {
+          this.batch.put(key, value)
+        } catch (e) {
+          throw new errors.WriteError(e)
+        }
+        this.ops.push({ type : 'put', key : key, value : value })
+
+        return this
+      }
+
+      Batch.prototype.del = function (key, options) {
+        options = getOptions(levelup, options)
+
+        if (key)
+          key = toSlice[options.keyEncoding](key)
+
+        try {
+          this.batch.del(key)
+        } catch (err) {
+          throw new errors.WriteError(err)
+        }
+        this.ops.push({ type : 'del', key : key })
+
+        return this
+      }
+
+      Batch.prototype.clear = function () {
+        try {
+          this.batch.clear()
+        } catch (err) {
+          throw new errors.WriteError(err)
+        }
+
+        this.ops = []
+        return this
+      }
+
+      Batch.prototype.write = function (callback) {
+        var ops = this.ops
+        try {
+          this.batch.write(function (err) {
+            if (err)
+              return dispatchError(new errors.WriteError(err), callback)
+            levelup.emit('batch', ops)
+            if (callback)
+              callback()
+          })
+        } catch (err) {
+          throw new errors.WriteError(err)
+        }
+      }
+
+      LevelUP.prototype.batch = function (arr, options, callback) {
+        var keyEnc
+          , valueEnc
+          , err
+
+        if (!arguments.length)
+          return new Batch(this.db)
+
+        callback = getCallback(options, callback)
+
+        if (!Array.isArray(arr)) {
+          err = new errors.WriteError('batch() requires an array argument')
+          return dispatchError(err, callback)
+        }
+
+        if (!isOpening() && !isOpen()) {
+          err = new errors.WriteError('Database is not open')
+          return dispatchError(err, callback)
+        }
+
+        options  = getOptions(levelup, options)
+        keyEnc   = options.keyEncoding
+        valueEnc = options.valueEncoding
+
+        arr = arr.map(function (e) {
+          if (e.type === undefined || e.key === undefined) {
+            return {}
+          }
+
+          // inherit encoding
+          var kEnc = e.keyEncoding || keyEnc
+            , vEnc = e.valueEncoding || e.encoding || valueEnc
+            , o
+
+          // If we're not dealing with plain utf8 strings or plain
+          // Buffers then we have to do some work on the array to
+          // encode the keys and/or values. This includes JSON types.
+          if (kEnc != 'utf8' && kEnc != 'binary'
+              || vEnc != 'utf8' && vEnc != 'binary') {
+            o = { type: e.type, key: toSlice[kEnc](e.key) }
+
+            if (e.value !== undefined)
+              o.value = toSlice[vEnc](e.value)
+
+            return o
+          } else {
+            return e
+          }
+        })
+
+        this.db.batch(arr, options, function (err) {
+          if (err) {
+            err = new errors.WriteError(err)
+            return dispatchError(err, callback)
+          } else {
+            levelup.emit('batch', arr)
+            if (callback)
+              callback()
+          }
+        })
+      }
+
+      // DEPRECATED: prefer accessing LevelDOWN for this: db.db.approximateSize()
+      LevelUP.prototype.approximateSize = function (start, end, callback) {
+        var err
+
+        if (start === null || start === undefined
+              || end === null || end === undefined
+              || typeof callback != 'function') {
+          err = new errors.ReadError('approximateSize() requires start, end and callback arguments')
+          return dispatchError(err, callback)
+        }
+
+        if (!isOpening() && !isOpen()) {
+          err = new errors.WriteError('Database is not open')
+          return dispatchError(err, callback)
+        }
+
+        this.db.approximateSize(start, end, function (err, size) {
+          if (err) {
+            err = new errors.OpenError(err)
+            return dispatchError(err, callback)
+          } else if (callback)
+            callback(null, size)
+        })
+      }
+
+      LevelUP.prototype.readStream =
+      LevelUP.prototype.createReadStream = function (options) {
+        options = extend(this.options, options)
+        return readStream.create(
+            options
+          , this
+          , function (options) {
+              return levelup.db.iterator(options)
+            }
+        )
+      }
+
+      LevelUP.prototype.keyStream =
+      LevelUP.prototype.createKeyStream = function (options) {
+        return this.readStream(extend(options, { keys: true, values: false }))
+      }
+
+      LevelUP.prototype.valueStream =
+      LevelUP.prototype.createValueStream = function (options) {
+        return this.readStream(extend(options, { keys: false, values: true }))
+      }
+
+      LevelUP.prototype.writeStream =
+      LevelUP.prototype.createWriteStream = function (options) {
+        return writeStream.create(extend(options), this)
+      }
+
+      LevelUP.prototype.toString = function () {
+        return 'LevelUP'
+      }
+
+      levelup = new LevelUP(location, options)
+      levelup.open(callback)
+      return levelup
+    }
+
+  , utilStatic = function (name) {
+      return function (location, callback) {
+        getLevelDOWN()[name](location, callback || function () {})
+      }
+    }
+
+module.exports         = createLevelUP
+module.exports.copy    = util.copy
+// DEPRECATED: prefer accessing LevelDOWN for this: require('leveldown').destroy()
+module.exports.destroy = utilStatic('destroy')
+// DEPRECATED: prefer accessing LevelDOWN for this: require('leveldown').repair()
+module.exports.repair  = utilStatic('repair')
+
+})(require("__browserify_process"))
+},{"./errors":64,"./read-stream":67,"./util":68,"./write-stream":69,"__browserify_process":11,"events":3,"prr":73,"util":5,"xtend":76}],66:[function(require,module,exports){
+function State () {
+  this.ended = this._ready = this._reading = this._destroyed = this._paused = false
+}
+
+State.prototype.end = function() {
+  this.ended = true
+  this._destroyed = false
+}
+
+State.prototype.ready = function() {
+  this._ready = true
+}
+
+State.prototype.destroy = function() {
+  this._destroyed = true
+}
+
+State.prototype.pause = function() {
+  this._paused = true
+}
+
+State.prototype.resume = function() {
+  this._paused = false
+}
+
+State.prototype.read = function() {
+  this._reading = true
+}
+
+State.prototype.endRead = function() {
+  this._reading = false
+}
+
+State.prototype.canPause = function() {
+  return !this.ended && !this._paused
+}
+
+State.prototype.canResume = function() {
+  return !this.ended && this._paused
+}
+
+State.prototype.canRead = function() {
+  return !this.ended && !this._reading && !this._paused
+}
+
+State.prototype.canCleanup = function() {
+  return !this.ended && !this._reading
+}
+
+State.prototype.canEmitData = function() {
+  return !this.ended && !this._destroyed
+}
+
+State.prototype.canEnd = function() {
+  return !this.ended
+}
+
+module.exports = function () { return new State() }
+},{}],67:[function(require,module,exports){
+(function(Buffer){/* Copyright (c) 2012-2013 LevelUP contributors
+ * See list at <https://github.com/rvagg/node-levelup#contributing>
+ * MIT +no-false-attribs License <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
+ */
+
+var Stream       = require('stream').Stream
+  , bufferStream = require('simple-bufferstream')
+  , inherits     = require('util').inherits
+  , extend       = require('xtend')
+  , errors       = require('./errors')
+  , State        = require('./read-stream-state')
+
+  , toEncoding   = require('./util').toEncoding
+  , toSlice      = require('./util').toSlice
+
+  , defaultOptions = { keys: true, values: true }
+
+  , makeKeyValueData = function (key, keyEncoding, value, valueEncoding) {
+      return {
+          key: toEncoding[keyEncoding](key)
+        , value: toEncoding[valueEncoding](value)
+      }
+    }
+  , makeKeyData = function (key, keyEncoding) {
+      return toEncoding[keyEncoding](key)
+    }
+  , makeValueData = function (_, __, value, valueEncoding) {
+      return toEncoding[valueEncoding](value)
+    }
+  , makeNoData = function () { return null }
+
+function ReadStream (options, db, iteratorFactory) {
+  Stream.call(this)
+
+  this._state = State()
+
+  this._dataEvent = 'data'
+  this.readable = true
+  this.writable = false
+
+  // purely to keep `db` around until we're done so it's not GCed if the user doesn't keep a ref
+  this._db = db
+
+  options = this._options = extend(defaultOptions, options)
+  this._keyEncoding   = options.keyEncoding   || options.encoding
+  this._valueEncoding = options.valueEncoding || options.encoding
+  if (typeof this._options.start != 'undefined')
+    this._options.start = toSlice[this._keyEncoding](this._options.start)
+  if (typeof this._options.end != 'undefined')
+    this._options.end = toSlice[this._keyEncoding](this._options.end)
+  if (typeof this._options.limit != 'number')
+    this._options.limit = -1
+  this._options.keyAsBuffer   = this._keyEncoding != 'utf8'   && this._keyEncoding != 'json'
+  this._options.valueAsBuffer = this._valueEncoding != 'utf8' && this._valueEncoding != 'json'
+
+  this._makeData = this._options.keys && this._options.values
+    ? makeKeyValueData : this._options.keys
+      ? makeKeyData : this._options.values
+        ? makeValueData : makeNoData
+
+  var self = this
+  var ready = function () {
+    if (!self._state.canEmitData())
+      return
+
+    self._state.ready()
+    self._iterator = iteratorFactory(self._options)
+    self._read()
+  }
+
+  if (db.isOpen())
+    ready()
+  else
+    db.once('ready', ready)
+}
+
+inherits(ReadStream, Stream)
+
+ReadStream.prototype.destroy = function () {
+  this._state.destroy()
+  if (this._state.canCleanup())
+    this._cleanup()
+}
+
+ReadStream.prototype.pause = function () {
+  if (this._state.canPause()) {
+    this._state.pause()
+    this.emit('pause')
+  }
+}
+
+ReadStream.prototype.resume = function () {
+  if (this._state.canResume()) {
+    this.emit('resume')
+    this._state.resume()
+    this._read()
+  }
+}
+
+ReadStream.prototype.pipe = function (dest) {
+  if (typeof dest.add == 'function' && this._options.type == 'fstream') {
+    this._dataEvent = 'entry'
+    var self = this
+    this.on('entry', function (data) {
+      var entry = bufferStream(new Buffer(data.value))
+      entry.path = data.key.toString()
+      entry.type = 'File'
+      entry.props = {
+          type: 'File'
+        , path: data.key.toString()
+      }
+      entry.pause()
+      if (dest.add(entry) === false)
+        self.pause()
+    })
+  }
+  return Stream.prototype.pipe.apply(this, arguments)
+}
+
+ReadStream.prototype._read = function () {
+  var self = this
+  if (this._state.canRead()) {
+    this._state.read()
+    this._iterator.next(function(err, key, value) {
+      self._onData(err, key, value)
+    })
+  }
+}
+
+ReadStream.prototype._onData = function (err, key, value) {
+  this._state.endRead()
+  if (err || (key === undefined && value === undefined) || !this._state.canEmitData())
+    return this._cleanup(err)
+  this._read() // queue another read even tho we may not need it
+  try {
+    value = this._makeData(key, this._keyEncoding, value, this._valueEncoding)
+  } catch (e) {
+    return this.emit('error', new errors.EncodingError(e))
+  }
+  this.emit(this._dataEvent, value)
+}
+
+ReadStream.prototype._cleanup = function (err) {
+  if (err)
+    this.emit('error', err)
+
+  if (!this._state.canEnd())
+    return
+
+  this._state.end()
+  this.readable = false
+
+  this.emit('end')
+
+  if (this._iterator) {
+    var self = this
+    this._iterator.end(function () {
+      self._iterator = null
+      self.emit('close')
+    })
+  } else
+    this.emit('close')
+}
+
+ReadStream.prototype.toString = function () {
+  return 'LevelUP.ReadStream'
+}
+
+module.exports.create = function (options, db, iteratorFactory) {
+  return new ReadStream(options, db, iteratorFactory)
+}
+
+})(require("__browserify_Buffer").Buffer)
+},{"./errors":64,"./read-stream-state":66,"./util":68,"__browserify_Buffer":10,"simple-bufferstream":74,"stream":4,"util":5,"xtend":76}],68:[function(require,module,exports){
+(function(process,global){/* Copyright (c) 2012-2013 LevelUP contributors
+ * See list at <https://github.com/rvagg/node-levelup#contributing>
+ * MIT +no-false-attribs License
+ * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
+ */
+
+var extend = require('xtend')
+  , errors = require('./errors')
+  , bops   = require('bops')
+
+  , encodings = [
+        'hex'
+      , 'utf8'
+      , 'utf-8'
+      , 'ascii'
+      , 'binary'
+      , 'base64'
+      , 'ucs2'
+      , 'ucs-2'
+      , 'utf16le'
+      , 'utf-16le'
+    ]
+
+  , defaultOptions = {
+        createIfMissing : true
+      , errorIfExists   : false
+      , keyEncoding     : 'utf8'
+      , valueEncoding   : 'utf8'
+      , compression     : true
+    }
+
+  , leveldown
+
+  , toSlice = (function () {
+      var slicers = {}
+        , isBuffer = function (data) {
+            return data === undefined || data === null || bops.is(data)
+          }
+      slicers.json = JSON.stringify
+      slicers.utf8 = function (data) {
+        return isBuffer(data) ? data : String(data)
+      }
+      encodings.forEach(function (enc) {
+        if (slicers[enc]) return
+        slicers[enc] = function (data) {
+          return isBuffer(data) ? data : bops.from(data, enc)
+        }
+      })
+      return slicers
+    }())
+
+  , toEncoding = (function () {
+      var encoders = {}
+      encoders.json = function (str) { return JSON.parse(str) }
+      encoders.utf8 = function (str) { return str }
+      encoders.binary = function (buffer) { return buffer }
+      encodings.forEach(function (enc) {
+        if (encoders[enc]) return
+        encoders[enc] = function (buffer) { return bops.to(buffer, enc) }
+      })
+      return encoders
+    }())
+
+  , copy = function (srcdb, dstdb, callback) {
+      srcdb.readStream()
+        .pipe(dstdb.writeStream())
+        .on('close', callback ? callback : function () {})
+        .on('error', callback ? callback : function (err) { throw err })
+    }
+
+  , setImmediate = global.setImmediate || process.nextTick
+
+  , encodingOpts = (function () {
+      var eo = {}
+      encodings.forEach(function (e) {
+        eo[e] = { valueEncoding : e }
+      })
+      return eo
+    }())
+
+  , getOptions = function (levelup, options) {
+      var s = typeof options == 'string' // just an encoding
+      if (!s && options && options.encoding && !options.valueEncoding)
+        options.valueEncoding = options.encoding
+      return extend(
+          (levelup && levelup.options) || {}
+        , s ? encodingOpts[options] || encodingOpts[defaultOptions.valueEncoding]
+            : options
+      )
+    }
+
+  , getLevelDOWN = function () {
+      if (leveldown)
+        return leveldown
+
+      var requiredVersion       = require('../package.json').devDependencies.leveldown
+        , missingLevelDOWNError = 'Could not locate LevelDOWN, try `npm install leveldown`'
+        , leveldownVersion
+
+      try {
+        leveldownVersion = require('leveldown/package').version
+      } catch (e) {
+        throw new errors.LevelUPError(missingLevelDOWNError)
+      }
+
+      if (!require('semver').satisfies(leveldownVersion, requiredVersion)) {
+        throw new errors.LevelUPError(
+            'Installed version of LevelDOWN ('
+          + leveldownVersion
+          + ') does not match required version ('
+          + requiredVersion
+          + ')'
+        )
+      }
+
+      try {
+        return leveldown = require('leveldown')
+      } catch (e) {
+        throw new errors.LevelUPError(missingLevelDOWNError)
+      }
+    }
+
+module.exports = {
+    defaultOptions : defaultOptions
+  , toSlice        : toSlice
+  , toEncoding     : toEncoding
+  , copy           : copy
+  , setImmediate   : setImmediate
+  , getOptions     : getOptions
+  , getLevelDOWN   : getLevelDOWN
+}
+
+})(require("__browserify_process"),self)
+},{"../package.json":81,"./errors":64,"__browserify_process":11,"bops":36,"leveldown":9,"leveldown/package":9,"semver":9,"xtend":76}],69:[function(require,module,exports){
+/* Copyright (c) 2012-2013 LevelUP contributors
+ * See list at <https://github.com/rvagg/node-levelup#contributing>
+ * MIT +no-false-attribs License
+ * <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
+ */
+
+var Stream       = require('stream').Stream
+  , inherits     = require('util').inherits
+  , extend       = require('xtend')
+  , concatStream = require('concat-stream')
+
+  , setImmediate = require('./util').setImmediate
+
+  , getOptions   = require('./util').getOptions
+
+  , defaultOptions = { type: 'put' }
+
+function WriteStream (options, db) {
+  Stream.call(this)
+  this._options = extend(defaultOptions, getOptions(db, options))
+  this._db      = db
+  this._buffer  = []
+  this._status  = 'init'
+  this._end     = false
+  this.writable = true
+  this.readable = false
+
+  var self = this
+  var ready = function () {
+    if (!self.writable)
+      return
+    self._status = 'ready'
+    self.emit('ready')
+    self._process()
+  }
+
+  if (db.isOpen())
+    setImmediate(ready)
+  else
+    db.once('ready', ready)
+}
+
+inherits(WriteStream, Stream)
+
+WriteStream.prototype.write = function (data) {
+  if (!this.writable)
+    return false
+  this._buffer.push(data)
+  if (this._status != 'init')
+    this._processDelayed()
+  if (this._options.maxBufferLength &&
+      this._buffer.length > this._options.maxBufferLength) {
+    this._writeBlock = true
+    return false
+  }
+  return true
+}
+
+WriteStream.prototype.end = function (data) {
+  var self = this
+  if (data)
+    this.write(data)
+  setImmediate(function () {
+    self._end = true
+    self._process()
+  })
+}
+
+WriteStream.prototype.destroy = function () {
+  this.writable = false
+  this.end()
+}
+
+WriteStream.prototype.destroySoon = function () {
+  this.end()
+}
+
+WriteStream.prototype.add = function (entry) {
+  if (!entry.props)
+    return
+  if (entry.props.Directory)
+    entry.pipe(this._db.writeStream(this._options))
+  else if (entry.props.File || entry.File || entry.type == 'File')
+    this._write(entry)
+  return true
+}
+
+WriteStream.prototype._processDelayed = function () {
+  var self = this
+  setImmediate(function () {
+    self._process()
+  })
+}
+
+WriteStream.prototype._process = function () {
+  var buffer
+    , self = this
+
+    , cb = function (err) {
+        if (!self.writable)
+          return
+        if (self._status != 'closed')
+          self._status = 'ready'
+        if (err) {
+          self.writable = false
+          return self.emit('error', err)
+        }
+        self._process()
+      }
+
+  if (self._status != 'ready' && self.writable) {
+    if (self._buffer.length && self._status != 'closed')
+      self._processDelayed()
+    return
+  }
+
+  if (self._buffer.length && self.writable) {
+    self._status = 'writing'
+    buffer       = self._buffer
+    self._buffer = []
+
+    self._db.batch(buffer.map(function (d) {
+      return {
+          type          : d.type || self._options.type
+        , key           : d.key
+        , value         : d.value
+        , keyEncoding   : d.keyEncoding || self._options.keyEncoding
+        , valueEncoding : d.valueEncoding
+            || d.encoding
+            || self._options.valueEncoding
+      }
+    }), cb)
+
+    if (self._writeBlock) {
+      self._writeBlock = false
+      self.emit('drain')
+    }
+
+    // don't allow close until callback has returned
+    return
+  }
+
+  if (self._end && self._status != 'closed') {
+    self._status  = 'closed'
+    self.writable = false
+    self.emit('close')
+  }
+}
+
+WriteStream.prototype._write = function (entry) {
+  var key = entry.path || entry.props.path
+    , self = this
+
+  if (!key)
+    return
+
+  entry.pipe(concatStream(function (err, data) {
+    if (err) {
+      self.writable = false
+      return self.emit('error', err)
+    }
+
+    if (self._options.fstreamRoot &&
+        key.indexOf(self._options.fstreamRoot) > -1)
+      key = key.substr(self._options.fstreamRoot.length + 1)
+
+    self.write({ key: key, value: data })
+  }))
+}
+
+WriteStream.prototype.toString = function () {
+  return 'LevelUP.WriteStream'
+}
+
+module.exports.create = function (options, db) {
+  return new WriteStream(options, db)
+}
+
+},{"./util":68,"concat-stream":70,"stream":4,"util":5,"xtend":76}],70:[function(require,module,exports){
+(function(Buffer){var stream = require('stream')
+var util = require('util')
+
+function ConcatStream(cb) {
+  stream.Stream.call(this)
+  this.writable = true
+  if (cb) this.cb = cb
+  this.body = []
+  this.on('error', function(err) {
+    if (this.cb) this.cb(err)
+  })
+}
+
+util.inherits(ConcatStream, stream.Stream)
+
+ConcatStream.prototype.write = function(chunk) {
+  this.body.push(chunk)
+}
+
+ConcatStream.prototype.destroy = function() {}
+
+ConcatStream.prototype.arrayConcat = function(arrs) {
+  if (arrs.length === 0) return []
+  if (arrs.length === 1) return arrs[0]
+  return arrs.reduce(function (a, b) { return a.concat(b) })
+}
+
+ConcatStream.prototype.isArray = function(arr) {
+  return Array.isArray(arr)
+}
+
+ConcatStream.prototype.getBody = function () {
+  if (this.body.length === 0) return
+  if (typeof(this.body[0]) === "string") return this.body.join('')
+  if (this.isArray(this.body[0])) return this.arrayConcat(this.body)
+  if (typeof(Buffer) !== "undefined" && Buffer.isBuffer(this.body[0])) {
+    return Buffer.concat(this.body)
+  }
+  return this.body
+}
+
+ConcatStream.prototype.end = function() {
+  if (this.cb) this.cb(false, this.getBody())
+}
+
+module.exports = function(cb) {
+  return new ConcatStream(cb)
+}
+
+module.exports.ConcatStream = ConcatStream
+
+})(require("__browserify_Buffer").Buffer)
+},{"__browserify_Buffer":10,"stream":4,"util":5}],71:[function(require,module,exports){
+function init (name, message, cause) {
+  this.name      = name
+  // can be passed just a 'cause'
+  this.cause     = typeof message != 'string' ? message : cause
+  this.message   = !!message && typeof message != 'string' ? message.message : message
+}
+
+// generic prototype, not intended to be actually used - helpful for `instanceof`
+function CustomError (message, cause) {
+  Error.call(this)
+  if (Error.captureStackTrace)
+    Error.captureStackTrace(this, arguments.callee)
+  init.call(this, 'CustomError', message, cause)
+}
+
+CustomError.prototype = new Error()
+
+function createError (errno, name, proto) {
+  var err = function (message, cause) {
+    init.call(this, name, message, cause)
+    //TODO: the specificity here is stupid, errno should be available everywhere
+    if (name == 'FilesystemError') {
+      this.code    = this.cause.code
+      this.path    = this.cause.path
+      this.errno   = this.cause.errno
+      this.message =
+        (errno.errno[this.cause.errno]
+          ? errno.errno[this.cause.errno].description
+          : this.cause.message)
+        + (this.cause.path ? ' [' + this.cause.path + ']' : '')
+    }
+    Error.call(this)
+    if (Error.captureStackTrace)
+      Error.captureStackTrace(this, arguments.callee)
+  }
+  err.prototype = !!proto ? new proto() : new CustomError()
+  return err
+}
+
+module.exports = function (errno) {
+  var ce = function (name, proto) {
+    return createError(errno, name, proto)
+  }
+  return {
+      CustomError     : CustomError
+    , FilesystemError : ce('FilesystemError')
+    , createError     : ce
+  }
+}
+
+},{}],72:[function(require,module,exports){
+(function(){var all = module.exports.all = [
+ {
+  "errno": -1,
+  "code": "UNKNOWN",
+  "description": "unknown error"
+ },
+ {
+  "errno": 0,
+  "code": "OK",
+  "description": "success"
+ },
+ {
+  "errno": 1,
+  "code": "EOF",
+  "description": "end of file"
+ },
+ {
+  "errno": 2,
+  "code": "EADDRINFO",
+  "description": "getaddrinfo error"
+ },
+ {
+  "errno": 3,
+  "code": "EACCES",
+  "description": "permission denied"
+ },
+ {
+  "errno": 4,
+  "code": "EAGAIN",
+  "description": "resource temporarily unavailable"
+ },
+ {
+  "errno": 5,
+  "code": "EADDRINUSE",
+  "description": "address already in use"
+ },
+ {
+  "errno": 6,
+  "code": "EADDRNOTAVAIL",
+  "description": "address not available"
+ },
+ {
+  "errno": 7,
+  "code": "EAFNOSUPPORT",
+  "description": "address family not supported"
+ },
+ {
+  "errno": 8,
+  "code": "EALREADY",
+  "description": "connection already in progress"
+ },
+ {
+  "errno": 9,
+  "code": "EBADF",
+  "description": "bad file descriptor"
+ },
+ {
+  "errno": 10,
+  "code": "EBUSY",
+  "description": "resource busy or locked"
+ },
+ {
+  "errno": 11,
+  "code": "ECONNABORTED",
+  "description": "software caused connection abort"
+ },
+ {
+  "errno": 12,
+  "code": "ECONNREFUSED",
+  "description": "connection refused"
+ },
+ {
+  "errno": 13,
+  "code": "ECONNRESET",
+  "description": "connection reset by peer"
+ },
+ {
+  "errno": 14,
+  "code": "EDESTADDRREQ",
+  "description": "destination address required"
+ },
+ {
+  "errno": 15,
+  "code": "EFAULT",
+  "description": "bad address in system call argument"
+ },
+ {
+  "errno": 16,
+  "code": "EHOSTUNREACH",
+  "description": "host is unreachable"
+ },
+ {
+  "errno": 17,
+  "code": "EINTR",
+  "description": "interrupted system call"
+ },
+ {
+  "errno": 18,
+  "code": "EINVAL",
+  "description": "invalid argument"
+ },
+ {
+  "errno": 19,
+  "code": "EISCONN",
+  "description": "socket is already connected"
+ },
+ {
+  "errno": 20,
+  "code": "EMFILE",
+  "description": "too many open files"
+ },
+ {
+  "errno": 21,
+  "code": "EMSGSIZE",
+  "description": "message too long"
+ },
+ {
+  "errno": 22,
+  "code": "ENETDOWN",
+  "description": "network is down"
+ },
+ {
+  "errno": 23,
+  "code": "ENETUNREACH",
+  "description": "network is unreachable"
+ },
+ {
+  "errno": 24,
+  "code": "ENFILE",
+  "description": "file table overflow"
+ },
+ {
+  "errno": 25,
+  "code": "ENOBUFS",
+  "description": "no buffer space available"
+ },
+ {
+  "errno": 26,
+  "code": "ENOMEM",
+  "description": "not enough memory"
+ },
+ {
+  "errno": 27,
+  "code": "ENOTDIR",
+  "description": "not a directory"
+ },
+ {
+  "errno": 28,
+  "code": "EISDIR",
+  "description": "illegal operation on a directory"
+ },
+ {
+  "errno": 29,
+  "code": "ENONET",
+  "description": "machine is not on the network"
+ },
+ {
+  "errno": 31,
+  "code": "ENOTCONN",
+  "description": "socket is not connected"
+ },
+ {
+  "errno": 32,
+  "code": "ENOTSOCK",
+  "description": "socket operation on non-socket"
+ },
+ {
+  "errno": 33,
+  "code": "ENOTSUP",
+  "description": "operation not supported on socket"
+ },
+ {
+  "errno": 34,
+  "code": "ENOENT",
+  "description": "no such file or directory"
+ },
+ {
+  "errno": 35,
+  "code": "ENOSYS",
+  "description": "function not implemented"
+ },
+ {
+  "errno": 36,
+  "code": "EPIPE",
+  "description": "broken pipe"
+ },
+ {
+  "errno": 37,
+  "code": "EPROTO",
+  "description": "protocol error"
+ },
+ {
+  "errno": 38,
+  "code": "EPROTONOSUPPORT",
+  "description": "protocol not supported"
+ },
+ {
+  "errno": 39,
+  "code": "EPROTOTYPE",
+  "description": "protocol wrong type for socket"
+ },
+ {
+  "errno": 40,
+  "code": "ETIMEDOUT",
+  "description": "connection timed out"
+ },
+ {
+  "errno": 41,
+  "code": "ECHARSET",
+  "description": "invalid Unicode character"
+ },
+ {
+  "errno": 42,
+  "code": "EAIFAMNOSUPPORT",
+  "description": "address family for hostname not supported"
+ },
+ {
+  "errno": 44,
+  "code": "EAISERVICE",
+  "description": "servname not supported for ai_socktype"
+ },
+ {
+  "errno": 45,
+  "code": "EAISOCKTYPE",
+  "description": "ai_socktype not supported"
+ },
+ {
+  "errno": 46,
+  "code": "ESHUTDOWN",
+  "description": "cannot send after transport endpoint shutdown"
+ },
+ {
+  "errno": 47,
+  "code": "EEXIST",
+  "description": "file already exists"
+ },
+ {
+  "errno": 48,
+  "code": "ESRCH",
+  "description": "no such process"
+ },
+ {
+  "errno": 49,
+  "code": "ENAMETOOLONG",
+  "description": "name too long"
+ },
+ {
+  "errno": 50,
+  "code": "EPERM",
+  "description": "operation not permitted"
+ },
+ {
+  "errno": 51,
+  "code": "ELOOP",
+  "description": "too many symbolic links encountered"
+ },
+ {
+  "errno": 52,
+  "code": "EXDEV",
+  "description": "cross-device link not permitted"
+ },
+ {
+  "errno": 53,
+  "code": "ENOTEMPTY",
+  "description": "directory not empty"
+ },
+ {
+  "errno": 54,
+  "code": "ENOSPC",
+  "description": "no space left on device"
+ },
+ {
+  "errno": 55,
+  "code": "EIO",
+  "description": "i/o error"
+ },
+ {
+  "errno": 56,
+  "code": "EROFS",
+  "description": "read-only file system"
+ },
+ {
+  "errno": 57,
+  "code": "ENODEV",
+  "description": "no such device"
+ },
+ {
+  "errno": 58,
+  "code": "ESPIPE",
+  "description": "invalid seek"
+ },
+ {
+  "errno": 59,
+  "code": "ECANCELED",
+  "description": "operation canceled"
+ }
+]
+
+
+module.exports.errno = {
+    '-1': all[0]
+  , '0': all[1]
+  , '1': all[2]
+  , '2': all[3]
+  , '3': all[4]
+  , '4': all[5]
+  , '5': all[6]
+  , '6': all[7]
+  , '7': all[8]
+  , '8': all[9]
+  , '9': all[10]
+  , '10': all[11]
+  , '11': all[12]
+  , '12': all[13]
+  , '13': all[14]
+  , '14': all[15]
+  , '15': all[16]
+  , '16': all[17]
+  , '17': all[18]
+  , '18': all[19]
+  , '19': all[20]
+  , '20': all[21]
+  , '21': all[22]
+  , '22': all[23]
+  , '23': all[24]
+  , '24': all[25]
+  , '25': all[26]
+  , '26': all[27]
+  , '27': all[28]
+  , '28': all[29]
+  , '29': all[30]
+  , '31': all[31]
+  , '32': all[32]
+  , '33': all[33]
+  , '34': all[34]
+  , '35': all[35]
+  , '36': all[36]
+  , '37': all[37]
+  , '38': all[38]
+  , '39': all[39]
+  , '40': all[40]
+  , '41': all[41]
+  , '42': all[42]
+  , '44': all[43]
+  , '45': all[44]
+  , '46': all[45]
+  , '47': all[46]
+  , '48': all[47]
+  , '49': all[48]
+  , '50': all[49]
+  , '51': all[50]
+  , '52': all[51]
+  , '53': all[52]
+  , '54': all[53]
+  , '55': all[54]
+  , '56': all[55]
+  , '57': all[56]
+  , '58': all[57]
+  , '59': all[58]
+}
+
+
+module.exports.code = {
+    'UNKNOWN': all[0]
+  , 'OK': all[1]
+  , 'EOF': all[2]
+  , 'EADDRINFO': all[3]
+  , 'EACCES': all[4]
+  , 'EAGAIN': all[5]
+  , 'EADDRINUSE': all[6]
+  , 'EADDRNOTAVAIL': all[7]
+  , 'EAFNOSUPPORT': all[8]
+  , 'EALREADY': all[9]
+  , 'EBADF': all[10]
+  , 'EBUSY': all[11]
+  , 'ECONNABORTED': all[12]
+  , 'ECONNREFUSED': all[13]
+  , 'ECONNRESET': all[14]
+  , 'EDESTADDRREQ': all[15]
+  , 'EFAULT': all[16]
+  , 'EHOSTUNREACH': all[17]
+  , 'EINTR': all[18]
+  , 'EINVAL': all[19]
+  , 'EISCONN': all[20]
+  , 'EMFILE': all[21]
+  , 'EMSGSIZE': all[22]
+  , 'ENETDOWN': all[23]
+  , 'ENETUNREACH': all[24]
+  , 'ENFILE': all[25]
+  , 'ENOBUFS': all[26]
+  , 'ENOMEM': all[27]
+  , 'ENOTDIR': all[28]
+  , 'EISDIR': all[29]
+  , 'ENONET': all[30]
+  , 'ENOTCONN': all[31]
+  , 'ENOTSOCK': all[32]
+  , 'ENOTSUP': all[33]
+  , 'ENOENT': all[34]
+  , 'ENOSYS': all[35]
+  , 'EPIPE': all[36]
+  , 'EPROTO': all[37]
+  , 'EPROTONOSUPPORT': all[38]
+  , 'EPROTOTYPE': all[39]
+  , 'ETIMEDOUT': all[40]
+  , 'ECHARSET': all[41]
+  , 'EAIFAMNOSUPPORT': all[42]
+  , 'EAISERVICE': all[43]
+  , 'EAISOCKTYPE': all[44]
+  , 'ESHUTDOWN': all[45]
+  , 'EEXIST': all[46]
+  , 'ESRCH': all[47]
+  , 'ENAMETOOLONG': all[48]
+  , 'EPERM': all[49]
+  , 'ELOOP': all[50]
+  , 'EXDEV': all[51]
+  , 'ENOTEMPTY': all[52]
+  , 'ENOSPC': all[53]
+  , 'EIO': all[54]
+  , 'EROFS': all[55]
+  , 'ENODEV': all[56]
+  , 'ESPIPE': all[57]
+  , 'ECANCELED': all[58]
+}
+
+
+module.exports.custom = require("./custom")(module.exports)
+
+})()
+},{"./custom":71}],73:[function(require,module,exports){
+/*!
+  * prr
+  * (c) 2013 Rod Vagg <rod@vagg.org>
+  * https://github.com/rvagg/prr
+  * License: MIT
+  */
+
+(function (name, context, definition) {
+  if (typeof module != 'undefined' && module.exports)
+    module.exports = definition()
+  else
+    context[name] = definition()
+})('prr', this, function() {
+
+  var setProperty = typeof Object.defineProperty == 'function'
+      ? function (obj, key, options) {
+          Object.defineProperty(obj, key, options)
+          return obj
+        }
+      : function (obj, key, options) { // < es5
+          obj[key] = options.value
+          return obj
+        }
+
+    , makeOptions = function (value, options) {
+        var oo = typeof options == 'object'
+          , os = !oo && typeof options == 'string'
+          , op = function (p) {
+              return oo
+                ? !!options[p]
+                : os
+                  ? options.indexOf(p[0]) > -1
+                  : false
+            }
+
+        return {
+            enumerable   : op('enumerable')
+          , configurable : op('configurable')
+          , writable     : op('writable')
+          , value        : value
+        }
+      }
+
+    , prr = function (obj, key, value, options) {
+        var k
+
+        options = makeOptions(value, options)
+
+        if (typeof key == 'object') {
+          for (k in key) {
+            if (Object.hasOwnProperty.call(key, k)) {
+              options.value = key[k]
+              setProperty(obj, k, options)
+            }
+          }
+          return obj
+        }
+
+        return setProperty(obj, key, options)
+      }
+
+  return prr
+})
+},{}],74:[function(require,module,exports){
+(function(process){const stream = require('stream')
+    , util   = require('util')
+
+var SimpleBufferStream = function (buffer) {
+  var self = this
+  stream.Stream.call(self)
+  self._state  = 'ready'
+  self._buffer = buffer
+  process.nextTick(function () {
+    self._dump()
+  })
+}
+
+util.inherits(SimpleBufferStream, stream.Stream)
+
+SimpleBufferStream.prototype._dump = function() {
+  if (this._state != 'ready')
+    return
+
+  this._state = 'done'
+  this.emit('data', this._buffer)
+  this.emit('end')
+  this.emit('close')
+}
+
+SimpleBufferStream.prototype.pause = function() {
+  if (this._state != 'done')
+    this._state = 'paused'
+}
+SimpleBufferStream.prototype.resume = function() {
+  if (this._state == 'done')
+    return
+  this._state = 'ready'
+  this._dump()
+}
+
+SimpleBufferStream.prototype.destroy = function() {}
+
+module.exports = function (buffer) {
+  return new SimpleBufferStream(buffer)
+}
+
+})(require("__browserify_process"))
+},{"__browserify_process":11,"stream":4,"util":5}],75:[function(require,module,exports){
+module.exports = hasKeys
+
+function hasKeys(source) {
+    return source !== null &&
+        (typeof source === "object" ||
+        typeof source === "function")
+}
+
+},{}],76:[function(require,module,exports){
+var Keys = require("object-keys")
+var hasKeys = require("./has-keys")
+
+module.exports = extend
+
+function extend() {
+    var target = {}
+
+    for (var i = 0; i < arguments.length; i++) {
+        var source = arguments[i]
+
+        if (!hasKeys(source)) {
+            continue
+        }
+
+        var keys = Keys(source)
+
+        for (var j = 0; j < keys.length; j++) {
+            var name = keys[j]
+            target[name] = source[name]
+        }
+    }
+
+    return target
+}
+
+},{"./has-keys":75,"object-keys":77}],77:[function(require,module,exports){
+module.exports = Object.keys || require('./shim');
+
+
+},{"./shim":80}],78:[function(require,module,exports){
+
+var hasOwn = Object.prototype.hasOwnProperty;
+
+module.exports = function forEach (obj, fn, ctx) {
+    if (typeof fn !== 'function') {
+        throw new TypeError('iterator must be a function');
+    }
+    var l = obj.length;
+    if (l === +l) {
+        for (var i = 0; i < l; i++) {
+            fn.call(ctx, obj[i], i, obj);
+        }
+    } else {
+        for (var k in obj) {
+            if (hasOwn.call(obj, k)) {
+                fn.call(ctx, obj[k], k, obj);
+            }
+        }
+    }
+};
+
+
+},{}],79:[function(require,module,exports){
+
+/**!
+ * is
+ * the definitive JavaScript type testing library
+ * 
+ * @copyright 2013 Enrico Marino
+ * @license MIT
+ */
+
+var objProto = Object.prototype;
+var owns = objProto.hasOwnProperty;
+var toString = objProto.toString;
+var isActualNaN = function (value) {
+  return value !== value;
+};
+var NON_HOST_TYPES = {
+  "boolean": 1,
+  "number": 1,
+  "string": 1,
+  "undefined": 1
+};
+
+/**
+ * Expose `is`
+ */
+
+var is = module.exports = {};
+
+/**
+ * Test general.
+ */
+
+/**
+ * is.type
+ * Test if `value` is a type of `type`.
+ *
+ * @param {Mixed} value value to test
+ * @param {String} type type
+ * @return {Boolean} true if `value` is a type of `type`, false otherwise
+ * @api public
+ */
+
+is.a =
+is.type = function (value, type) {
+  return typeof value === type;
+};
+
+/**
+ * is.defined
+ * Test if `value` is defined.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if 'value' is defined, false otherwise
+ * @api public
+ */
+
+is.defined = function (value) {
+  return value !== undefined;
+};
+
+/**
+ * is.empty
+ * Test if `value` is empty.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is empty, false otherwise
+ * @api public
+ */
+
+is.empty = function (value) {
+  var type = toString.call(value);
+  var key;
+
+  if ('[object Array]' === type || '[object Arguments]' === type) {
+    return value.length === 0;
+  }
+
+  if ('[object Object]' === type) {
+    for (key in value) if (owns.call(value, key)) return false;
+    return true;
+  }
+
+  if ('[object String]' === type) {
+    return '' === value;
+  }
+
+  return false;
+};
+
+/**
+ * is.equal
+ * Test if `value` is equal to `other`.
+ *
+ * @param {Mixed} value value to test
+ * @param {Mixed} other value to compare with
+ * @return {Boolean} true if `value` is equal to `other`, false otherwise
+ */
+
+is.equal = function (value, other) {
+  var type = toString.call(value)
+  var key;
+
+  if (type !== toString.call(other)) {
+    return false;
+  }
+
+  if ('[object Object]' === type) {
+    for (key in value) {
+      if (!is.equal(value[key], other[key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  if ('[object Array]' === type) {
+    key = value.length;
+    if (key !== other.length) {
+      return false;
+    }
+    while (--key) {
+      if (!is.equal(value[key], other[key])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  if ('[object Function]' === type) {
+    return value.prototype === other.prototype;
+  }
+
+  if ('[object Date]' === type) {
+    return value.getTime() === other.getTime();
+  }
+
+  return value === other;
+};
+
+/**
+ * is.hosted
+ * Test if `value` is hosted by `host`.
+ *
+ * @param {Mixed} value to test
+ * @param {Mixed} host host to test with
+ * @return {Boolean} true if `value` is hosted by `host`, false otherwise
+ * @api public
+ */
+
+is.hosted = function (value, host) {
+  var type = typeof host[value];
+  return type === 'object' ? !!host[value] : !NON_HOST_TYPES[type];
+};
+
+/**
+ * is.instance
+ * Test if `value` is an instance of `constructor`.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an instance of `constructor`
+ * @api public
+ */
+
+is.instance = is['instanceof'] = function (value, constructor) {
+  return value instanceof constructor;
+};
+
+/**
+ * is.null
+ * Test if `value` is null.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is null, false otherwise
+ * @api public
+ */
+
+is['null'] = function (value) {
+  return value === null;
+};
+
+/**
+ * is.undefined
+ * Test if `value` is undefined.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is undefined, false otherwise
+ * @api public
+ */
+
+is.undefined = function (value) {
+  return value === undefined;
+};
+
+/**
+ * Test arguments.
+ */
+
+/**
+ * is.arguments
+ * Test if `value` is an arguments object.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an arguments object, false otherwise
+ * @api public
+ */
+
+is.arguments = function (value) {
+  var isStandardArguments = '[object Arguments]' === toString.call(value);
+  var isOldArguments = !is.array(value) && is.arraylike(value) && is.object(value) && is.fn(value.callee);
+  return isStandardArguments || isOldArguments;
+};
+
+/**
+ * Test array.
+ */
+
+/**
+ * is.array
+ * Test if 'value' is an array.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an array, false otherwise
+ * @api public
+ */
+
+is.array = function (value) {
+  return '[object Array]' === toString.call(value);
+};
+
+/**
+ * is.arguments.empty
+ * Test if `value` is an empty arguments object.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an empty arguments object, false otherwise
+ * @api public
+ */
+is.arguments.empty = function (value) {
+  return is.arguments(value) && value.length === 0;
+};
+
+/**
+ * is.array.empty
+ * Test if `value` is an empty array.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an empty array, false otherwise
+ * @api public
+ */
+is.array.empty = function (value) {
+  return is.array(value) && value.length === 0;
+};
+
+/**
+ * is.arraylike
+ * Test if `value` is an arraylike object.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an arguments object, false otherwise
+ * @api public
+ */
+
+is.arraylike = function (value) {
+  return !!value && !is.boolean(value)
+    && owns.call(value, 'length')
+    && isFinite(value.length)
+    && is.number(value.length)
+    && value.length >= 0;
+};
+
+/**
+ * Test boolean.
+ */
+
+/**
+ * is.boolean
+ * Test if `value` is a boolean.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is a boolean, false otherwise
+ * @api public
+ */
+
+is.boolean = function (value) {
+  return '[object Boolean]' === toString.call(value);
+};
+
+/**
+ * is.false
+ * Test if `value` is false.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is false, false otherwise
+ * @api public
+ */
+
+is['false'] = function (value) {
+  return is.boolean(value) && (value === false || value.valueOf() === false);
+};
+
+/**
+ * is.true
+ * Test if `value` is true.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is true, false otherwise
+ * @api public
+ */
+
+is['true'] = function (value) {
+  return is.boolean(value) && (value === true || value.valueOf() === true);
+};
+
+/**
+ * Test date.
+ */
+
+/**
+ * is.date
+ * Test if `value` is a date.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is a date, false otherwise
+ * @api public
+ */
+
+is.date = function (value) {
+  return '[object Date]' === toString.call(value);
+};
+
+/**
+ * Test element.
+ */
+
+/**
+ * is.element
+ * Test if `value` is an html element.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an HTML Element, false otherwise
+ * @api public
+ */
+
+is.element = function (value) {
+  return value !== undefined
+    && typeof HTMLElement !== 'undefined'
+    && value instanceof HTMLElement
+    && value.nodeType === 1;
+};
+
+/**
+ * Test error.
+ */
+
+/**
+ * is.error
+ * Test if `value` is an error object.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an error object, false otherwise
+ * @api public
+ */
+
+is.error = function (value) {
+  return '[object Error]' === toString.call(value);
+};
+
+/**
+ * Test function.
+ */
+
+/**
+ * is.fn / is.function (deprecated)
+ * Test if `value` is a function.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is a function, false otherwise
+ * @api public
+ */
+
+is.fn = is['function'] = function (value) {
+  var isAlert = typeof window !== 'undefined' && value === window.alert;
+  return isAlert || '[object Function]' === toString.call(value);
+};
+
+/**
+ * Test number.
+ */
+
+/**
+ * is.number
+ * Test if `value` is a number.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is a number, false otherwise
+ * @api public
+ */
+
+is.number = function (value) {
+  return '[object Number]' === toString.call(value);
+};
+
+/**
+ * is.infinite
+ * Test if `value` is positive or negative infinity.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is positive or negative Infinity, false otherwise
+ * @api public
+ */
+is.infinite = function (value) {
+  return value === Infinity || value === -Infinity;
+};
+
+/**
+ * is.decimal
+ * Test if `value` is a decimal number.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is a decimal number, false otherwise
+ * @api public
+ */
+
+is.decimal = function (value) {
+  return is.number(value) && !isActualNaN(value) && value % 1 !== 0;
+};
+
+/**
+ * is.divisibleBy
+ * Test if `value` is divisible by `n`.
+ *
+ * @param {Number} value value to test
+ * @param {Number} n dividend
+ * @return {Boolean} true if `value` is divisible by `n`, false otherwise
+ * @api public
+ */
+
+is.divisibleBy = function (value, n) {
+  var isDividendInfinite = is.infinite(value);
+  var isDivisorInfinite = is.infinite(n);
+  var isNonZeroNumber = is.number(value) && !isActualNaN(value) && is.number(n) && !isActualNaN(n) && n !== 0;
+  return isDividendInfinite || isDivisorInfinite || (isNonZeroNumber && value % n === 0);
+};
+
+/**
+ * is.int
+ * Test if `value` is an integer.
+ *
+ * @param value to test
+ * @return {Boolean} true if `value` is an integer, false otherwise
+ * @api public
+ */
+
+is.int = function (value) {
+  return is.number(value) && !isActualNaN(value) && value % 1 === 0;
+};
+
+/**
+ * is.maximum
+ * Test if `value` is greater than 'others' values.
+ *
+ * @param {Number} value value to test
+ * @param {Array} others values to compare with
+ * @return {Boolean} true if `value` is greater than `others` values
+ * @api public
+ */
+
+is.maximum = function (value, others) {
+  if (isActualNaN(value)) {
+    throw new TypeError('NaN is not a valid value');
+  } else if (!is.arraylike(others)) {
+    throw new TypeError('second argument must be array-like');
+  }
+  var len = others.length;
+
+  while (--len >= 0) {
+    if (value < others[len]) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+/**
+ * is.minimum
+ * Test if `value` is less than `others` values.
+ *
+ * @param {Number} value value to test
+ * @param {Array} others values to compare with
+ * @return {Boolean} true if `value` is less than `others` values
+ * @api public
+ */
+
+is.minimum = function (value, others) {
+  if (isActualNaN(value)) {
+    throw new TypeError('NaN is not a valid value');
+  } else if (!is.arraylike(others)) {
+    throw new TypeError('second argument must be array-like');
+  }
+  var len = others.length;
+
+  while (--len >= 0) {
+    if (value > others[len]) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+/**
+ * is.nan
+ * Test if `value` is not a number.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is not a number, false otherwise
+ * @api public
+ */
+
+is.nan = function (value) {
+  return !is.number(value) || value !== value;
+};
+
+/**
+ * is.even
+ * Test if `value` is an even number.
+ *
+ * @param {Number} value value to test
+ * @return {Boolean} true if `value` is an even number, false otherwise
+ * @api public
+ */
+
+is.even = function (value) {
+  return is.infinite(value) || (is.number(value) && value === value && value % 2 === 0);
+};
+
+/**
+ * is.odd
+ * Test if `value` is an odd number.
+ *
+ * @param {Number} value value to test
+ * @return {Boolean} true if `value` is an odd number, false otherwise
+ * @api public
+ */
+
+is.odd = function (value) {
+  return is.infinite(value) || (is.number(value) && value === value && value % 2 !== 0);
+};
+
+/**
+ * is.ge
+ * Test if `value` is greater than or equal to `other`.
+ *
+ * @param {Number} value value to test
+ * @param {Number} other value to compare with
+ * @return {Boolean}
+ * @api public
+ */
+
+is.ge = function (value, other) {
+  if (isActualNaN(value) || isActualNaN(other)) {
+    throw new TypeError('NaN is not a valid value');
+  }
+  return !is.infinite(value) && !is.infinite(other) && value >= other;
+};
+
+/**
+ * is.gt
+ * Test if `value` is greater than `other`.
+ *
+ * @param {Number} value value to test
+ * @param {Number} other value to compare with
+ * @return {Boolean}
+ * @api public
+ */
+
+is.gt = function (value, other) {
+  if (isActualNaN(value) || isActualNaN(other)) {
+    throw new TypeError('NaN is not a valid value');
+  }
+  return !is.infinite(value) && !is.infinite(other) && value > other;
+};
+
+/**
+ * is.le
+ * Test if `value` is less than or equal to `other`.
+ *
+ * @param {Number} value value to test
+ * @param {Number} other value to compare with
+ * @return {Boolean} if 'value' is less than or equal to 'other'
+ * @api public
+ */
+
+is.le = function (value, other) {
+  if (isActualNaN(value) || isActualNaN(other)) {
+    throw new TypeError('NaN is not a valid value');
+  }
+  return !is.infinite(value) && !is.infinite(other) && value <= other;
+};
+
+/**
+ * is.lt
+ * Test if `value` is less than `other`.
+ *
+ * @param {Number} value value to test
+ * @param {Number} other value to compare with
+ * @return {Boolean} if `value` is less than `other`
+ * @api public
+ */
+
+is.lt = function (value, other) {
+  if (isActualNaN(value) || isActualNaN(other)) {
+    throw new TypeError('NaN is not a valid value');
+  }
+  return !is.infinite(value) && !is.infinite(other) && value < other;
+};
+
+/**
+ * is.within
+ * Test if `value` is within `start` and `finish`.
+ *
+ * @param {Number} value value to test
+ * @param {Number} start lower bound
+ * @param {Number} finish upper bound
+ * @return {Boolean} true if 'value' is is within 'start' and 'finish'
+ * @api public
+ */
+is.within = function (value, start, finish) {
+  if (isActualNaN(value) || isActualNaN(start) || isActualNaN(finish)) {
+    throw new TypeError('NaN is not a valid value');
+  } else if (!is.number(value) || !is.number(start) || !is.number(finish)) {
+    throw new TypeError('all arguments must be numbers');
+  }
+  var isAnyInfinite = is.infinite(value) || is.infinite(start) || is.infinite(finish);
+  return isAnyInfinite || (value >= start && value <= finish);
+};
+
+/**
+ * Test object.
+ */
+
+/**
+ * is.object
+ * Test if `value` is an object.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is an object, false otherwise
+ * @api public
+ */
+
+is.object = function (value) {
+  return value && '[object Object]' === toString.call(value);
+};
+
+/**
+ * is.hash
+ * Test if `value` is a hash - a plain object literal.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is a hash, false otherwise
+ * @api public
+ */
+
+is.hash = function (value) {
+  return is.object(value) && value.constructor === Object && !value.nodeType && !value.setInterval;
+};
+
+/**
+ * Test regexp.
+ */
+
+/**
+ * is.regexp
+ * Test if `value` is a regular expression.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if `value` is a regexp, false otherwise
+ * @api public
+ */
+
+is.regexp = function (value) {
+  return '[object RegExp]' === toString.call(value);
+};
+
+/**
+ * Test string.
+ */
+
+/**
+ * is.string
+ * Test if `value` is a string.
+ *
+ * @param {Mixed} value value to test
+ * @return {Boolean} true if 'value' is a string, false otherwise
+ * @api public
+ */
+
+is.string = function (value) {
+  return '[object String]' === toString.call(value);
+};
+
+
+},{}],80:[function(require,module,exports){
+(function () {
+	"use strict";
+
+	// modified from https://github.com/kriskowal/es5-shim
+	var has = Object.prototype.hasOwnProperty,
+		is = require('is'),
+		forEach = require('foreach'),
+		hasDontEnumBug = !({'toString': null}).propertyIsEnumerable('toString'),
+		dontEnums = [
+			"toString",
+			"toLocaleString",
+			"valueOf",
+			"hasOwnProperty",
+			"isPrototypeOf",
+			"propertyIsEnumerable",
+			"constructor"
+		],
+		keysShim;
+
+	keysShim = function keys(object) {
+		if (!is.object(object) && !is.array(object)) {
+			throw new TypeError("Object.keys called on a non-object");
+		}
+
+		var name, theKeys = [];
+		for (name in object) {
+			if (has.call(object, name)) {
+				theKeys.push(name);
+			}
+		}
+
+		if (hasDontEnumBug) {
+			forEach(dontEnums, function (dontEnum) {
+				if (has.call(object, dontEnum)) {
+					theKeys.push(dontEnum);
+				}
+			});
+		}
+		return theKeys;
+	};
+
+	module.exports = keysShim;
+}());
+
+
+},{"foreach":78,"is":79}],81:[function(require,module,exports){
 (function(){module.exports={
   "name": "levelup",
   "description": "Fast & simple storage - a Node.js-style LevelDB wrapper",
@@ -16989,336 +18172,5 @@ is.string = function (value) {
 }
 
 })()
-},{}],78:[function(require,module,exports){
-var bits = require("bit-twiddle")
-
-function size(chunk) {
-  var count = 0
-  var chunk_len = chunk.length
-  var i = 0, v, l
-  while(i<chunk.length) {
-    v = chunk[i]
-    l = 0
-    while(i < chunk_len && chunk[i] === v) {
-      ++i
-      ++l
-    }
-    count += (bits.log2(l) / 7)|0
-    count += (bits.log2(v>>>0) / 7)|0
-    count += 2
-  }
-  return count
-}
-exports.size = size
-
-function encode(chunk, runs) {
-  if(!runs) {
-    runs = new Uint8Array(size(chunk))
-  }
-  var rptr = 0, nruns = runs.length
-  var i = 0, v, l
-  while(i<chunk.length) {
-    v = chunk[i]
-    l = 0
-    while(i < chunk.length && chunk[i] === v) {
-      ++i
-      ++l
-    }
-    while(rptr < nruns && l >= 128) {
-      runs[rptr++] = 128 + (l&0x7f)
-      l >>>= 7
-    }
-    if(rptr >= nruns) {
-      throw new Error("RLE buffer overflow")
-    }
-    runs[rptr++] = l
-    v >>>= 0
-    while(rptr < nruns && v >= 128) {
-      runs[rptr++] = 128 + (v&0x7f)
-      v >>>= 7
-    }
-    if(rptr >= nruns) {
-      throw new Error("RLE buffer overflow")
-    }
-    runs[rptr++] = v
-  }
-  return runs
-}
-exports.encode = encode
-
-function decode(runs, chunk) {
-  var buf_len = chunk.length
-  var nruns = runs.length
-  var cptr = 0
-  var ptr = 0
-  var l, s, v, i
-  while(ptr < nruns) {
-    l = 0
-    s = 0
-    while(ptr < nruns && runs[ptr] >= 128) {
-      l += (runs[ptr++]&0x7f) << s
-      s += 7
-    }
-    l += runs[ptr++] << s
-    if(ptr >= nruns) {
-      throw new Error("RLE buffer underrun")
-    }
-    if(cptr + l > buf_len) {
-      throw new Error("Chunk buffer overflow")
-    }
-    v = 0
-    s = 0
-    while(ptr < nruns && runs[ptr] >= 128) {
-      v += (runs[ptr++]&0x7f) << s
-      s += 7
-    }
-    if(ptr >= nruns) {
-      throw new Error("RLE buffer underrun")
-    }
-    v += runs[ptr++] << s
-    for(i=0; i<l; ++i) {
-      chunk[cptr++] = v
-    }
-  }
-  return chunk
-}
-exports.decode = decode
-
-},{"bit-twiddle":79}],79:[function(require,module,exports){
-/**
- * Bit twiddling hacks for JavaScript.
- *
- * Author: Mikola Lysenko
- *
- * Ported from Stanford bit twiddling hack library:
- *    http://graphics.stanford.edu/~seander/bithacks.html
- */
-
-"use strict"; "use restrict";
-
-//Number of bits in an integer
-var INT_BITS = 32;
-
-//Constants
-exports.INT_BITS  = INT_BITS;
-exports.INT_MAX   =  0x7fffffff;
-exports.INT_MIN   = -1<<(INT_BITS-1);
-
-//Returns -1, 0, +1 depending on sign of x
-exports.sign = function(v) {
-  return (v > 0) - (v < 0);
-}
-
-//Computes absolute value of integer
-exports.abs = function(v) {
-  var mask = v >> (INT_BITS-1);
-  return (v ^ mask) - mask;
-}
-
-//Computes minimum of integers x and y
-exports.min = function(x, y) {
-  return y ^ ((x ^ y) & -(x < y));
-}
-
-//Computes maximum of integers x and y
-exports.max = function(x, y) {
-  return x ^ ((x ^ y) & -(x < y));
-}
-
-//Checks if a number is a power of two
-exports.isPow2 = function(v) {
-  return !(v & (v-1)) && (!!v);
-}
-
-//Computes log base 2 of v
-exports.log2 = function(v) {
-  var r, shift;
-  r =     (v > 0xFFFF) << 4; v >>>= r;
-  shift = (v > 0xFF  ) << 3; v >>>= shift; r |= shift;
-  shift = (v > 0xF   ) << 2; v >>>= shift; r |= shift;
-  shift = (v > 0x3   ) << 1; v >>>= shift; r |= shift;
-  return r | (v >> 1);
-}
-
-//Computes log base 10 of v
-exports.log10 = function(v) {
-  return  (v >= 1000000000) ? 9 : (v >= 100000000) ? 8 : (v >= 10000000) ? 7 :
-          (v >= 1000000) ? 6 : (v >= 100000) ? 5 : (v >= 10000) ? 4 :
-          (v >= 1000) ? 3 : (v >= 100) ? 2 : (v >= 10) ? 1 : 0;
-}
-
-//Counts number of bits
-exports.popCount = function(v) {
-  v = v - ((v >>> 1) & 0x55555555);
-  v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
-  return ((v + (v >>> 4) & 0xF0F0F0F) * 0x1010101) >>> 24;
-}
-
-//Counts number of trailing zeros
-function countTrailingZeros(v) {
-  var c = 32;
-  v &= -v;
-  if (v) c--;
-  if (v & 0x0000FFFF) c -= 16;
-  if (v & 0x00FF00FF) c -= 8;
-  if (v & 0x0F0F0F0F) c -= 4;
-  if (v & 0x33333333) c -= 2;
-  if (v & 0x55555555) c -= 1;
-  return c;
-}
-exports.countTrailingZeros = countTrailingZeros;
-
-//Rounds to next power of 2
-exports.nextPow2 = function(v) {
-  v += v === 0;
-  --v;
-  v |= v >>> 1;
-  v |= v >>> 2;
-  v |= v >>> 4;
-  v |= v >>> 8;
-  v |= v >>> 16;
-  return v + 1;
-}
-
-//Rounds down to previous power of 2
-exports.prevPow2 = function(v) {
-  v |= v >>> 1;
-  v |= v >>> 2;
-  v |= v >>> 4;
-  v |= v >>> 8;
-  v |= v >>> 16;
-  return v - (v>>>1);
-}
-
-//Computes parity of word
-exports.parity = function(v) {
-  v ^= v >>> 16;
-  v ^= v >>> 8;
-  v ^= v >>> 4;
-  v &= 0xf;
-  return (0x6996 >>> v) & 1;
-}
-
-var REVERSE_TABLE = new Array(256);
-
-(function(tab) {
-  for(var i=0; i<256; ++i) {
-    var v = i, r = i, s = 7;
-    for (v >>>= 1; v; v >>>= 1) {
-      r <<= 1;
-      r |= v & 1;
-      --s;
-    }
-    tab[i] = (r << s) & 0xff;
-  }
-})(REVERSE_TABLE);
-
-//Reverse bits in a 32 bit word
-exports.reverse = function(v) {
-  return  (REVERSE_TABLE[ v         & 0xff] << 24) |
-          (REVERSE_TABLE[(v >>> 8)  & 0xff] << 16) |
-          (REVERSE_TABLE[(v >>> 16) & 0xff] << 8)  |
-           REVERSE_TABLE[(v >>> 24) & 0xff];
-}
-
-//Interleave bits of 2 coordinates with 16 bits.  Useful for fast quadtree codes
-exports.interleave2 = function(x, y) {
-  x &= 0xFFFF;
-  x = (x | (x << 8)) & 0x00FF00FF;
-  x = (x | (x << 4)) & 0x0F0F0F0F;
-  x = (x | (x << 2)) & 0x33333333;
-  x = (x | (x << 1)) & 0x55555555;
-
-  y &= 0xFFFF;
-  y = (y | (y << 8)) & 0x00FF00FF;
-  y = (y | (y << 4)) & 0x0F0F0F0F;
-  y = (y | (y << 2)) & 0x33333333;
-  y = (y | (y << 1)) & 0x55555555;
-
-  return x | (y << 1);
-}
-
-//Extracts the nth interleaved component
-exports.deinterleave2 = function(v, n) {
-  v = (v >>> n) & 0x55555555;
-  v = (v | (v >>> 1))  & 0x33333333;
-  v = (v | (v >>> 2))  & 0x0F0F0F0F;
-  v = (v | (v >>> 4))  & 0x00FF00FF;
-  v = (v | (v >>> 16)) & 0x000FFFF;
-  return (v << 16) >> 16;
-}
-
-
-//Interleave bits of 3 coordinates, each with 10 bits.  Useful for fast octree codes
-exports.interleave3 = function(x, y, z) {
-  x &= 0x3FF;
-  x  = (x | (x<<16)) & 4278190335;
-  x  = (x | (x<<8))  & 251719695;
-  x  = (x | (x<<4))  & 3272356035;
-  x  = (x | (x<<2))  & 1227133513;
-
-  y &= 0x3FF;
-  y  = (y | (y<<16)) & 4278190335;
-  y  = (y | (y<<8))  & 251719695;
-  y  = (y | (y<<4))  & 3272356035;
-  y  = (y | (y<<2))  & 1227133513;
-  x |= (y << 1);
-  
-  z &= 0x3FF;
-  z  = (z | (z<<16)) & 4278190335;
-  z  = (z | (z<<8))  & 251719695;
-  z  = (z | (z<<4))  & 3272356035;
-  z  = (z | (z<<2))  & 1227133513;
-  
-  return x | (z << 2);
-}
-
-//Extracts nth interleaved component of a 3-tuple
-exports.deinterleave3 = function(v, n) {
-  v = (v >>> n)       & 1227133513;
-  v = (v | (v>>>2))   & 3272356035;
-  v = (v | (v>>>4))   & 251719695;
-  v = (v | (v>>>8))   & 4278190335;
-  v = (v | (v>>>16))  & 0x3FF;
-  return (v<<22)>>22;
-}
-
-//Computes next combination in colexicographic order (this is mistakenly called nextPermutation on the bit twiddling hacks page)
-exports.nextCombination = function(v) {
-  var t = v | (v - 1);
-  return (t + 1) | (((~t & -~t) - 1) >>> (countTrailingZeros(v) + 1));
-}
-
-
-},{}],80:[function(require,module,exports){
-var leveljs = require('level-js')
-var crunch = require('voxel-crunch')
-
-module.exports = VoxelLevel
-
-function VoxelLevel(db) {
-  if (!(this instanceof VoxelLevel)) return new VoxelLevel(db)
-  this.db = db
-  return true
-}
-
-VoxelLevel.prototype.load = function(worldName, chunkPosition, dimensions, cb) {
-  var chunkLength = dimensions[0] * dimensions[1] * dimensions[2]
-  var chunkIndex = chunkPosition.join('|') + '|' + chunkLength
-  this.db.sublevel(worldName).get(chunkIndex, { valueEncoding: 'binary' }, function(err, rle) {
-    if (err) return cb(err)
-    var voxels = new Uint8Array(chunkLength)
-    crunch.decode(rle, voxels)
-    cb(false, {position: chunkPosition, voxels: voxels, dimensions: dimensions})
-  })
-}
-
-VoxelLevel.prototype.store = function(worldName, chunk, cb) {
-  var rle = crunch.encode(chunk.voxels)
-  var key = chunk.position.join('|')
-  key += '|' + chunk.voxels.length
-  this.db.sublevel(worldName).put(key, rle, { valueEncoding: 'binary' }, cb)
-}
-
-},{"level-js":57,"voxel-crunch":78}]},{},[1])
+},{}]},{},[1])
 ;
