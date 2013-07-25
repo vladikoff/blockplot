@@ -60,7 +60,7 @@ function initGame(user, options) {
     texturePath: textures,
     playerSkin: options.playerSkin || textures + '../player.png',
     chunkSize: gameChunkSize,
-    chunkDistance: 4,
+    chunkDistance: 5,
     arrayType: Uint8Array,
     worldOrigin: pos,
     materials: options.textures ? materials : colors,
