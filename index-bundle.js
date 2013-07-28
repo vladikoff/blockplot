@@ -5,7 +5,7 @@ var hat = require('hat')
 
 module.exports = function(user) {
   var username = 'anonymous'
-  if (user.session && user.session.email) username = user.session.email
+  if (user.profile && user.profile.email) username = user.profile.email
   
   var formContainer = $('#default-popup')
   
@@ -215,8 +215,8 @@ var commonStuff = require('./js/common')
 
 var user = levelUser({dbName: 'blocks', baseURL: "http://wzrd.in:9000" })
 
-user.getSession(function(err, session) {
-  user.session = session
+user.getProfile(function(err, profile) {
+  user.profile = profile
   commonStuff(user)
 })
 
@@ -8543,9 +8543,9 @@ function User(db, options) {
   this.options = options
 }
 
-User.prototype.getSession = function(cb) {
+User.prototype.getProfile = function(cb) {
   var self = this
-  var opts = { withCredentials: true, json: true, url: this.options.baseURL + '/_session' }
+  var opts = { withCredentials: true, json: true, url: this.options.baseURL + '/_profile' }
   request(opts, function(err, resp, profile) {
     if (err) return cb(err, {})
     if (!profile.email) return cb(err, profile)
