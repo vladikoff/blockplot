@@ -5,7 +5,7 @@ var commonStuff = require('./js/common')
 
 var user = levelUser({dbName: 'blocks', baseURL: "http://wzrd.in:9000" })
 
-user.getSession(function(err, session) {
-  user.session = session
+user.getProfile(function(err, profile) {
+  user.profile = profile
   commonStuff(user)
 })
