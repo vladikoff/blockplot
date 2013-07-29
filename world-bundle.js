@@ -5,7 +5,7 @@ var hat = require('hat')
 
 module.exports = function(user) {
   var username = 'anonymous'
-  if (user.profile && user.profile.email) username = user.profile.email
+  if (user.profile && user.profile.username) username = user.profile.username
   
   var formContainer = $('#default-popup')
   
@@ -62,7 +62,6 @@ module.exports = function(user) {
         content.append(itemHTML)
         content.find('a:last')
           .attr('href', '/world.html#' + world.id)
-          .click(function() { setTimeout(function() { window.location.reload() }, 100) }) // ugh
         content.find('dt:last').html(world.name)
         content.find('dd:last').text(world.published ? "Published": "Unpublished")
       })
@@ -58911,9 +58910,11 @@ function beginLoadingWorld(user) {
     var remote = user.remote(world.id)
     var local = user.db.sublevel(world.id)
     world.published = true
-    user.remote('worlds').put(world.id, world, {valueEncoding: 'json'}, function(err) {
-      if (err) return cb(err)
-      user.copy(local, remote, cb)
+    user.db.sublevel('worlds').put(world.id, world, {valueEncoding: 'json'}, function(err) {
+      user.remote('worlds').put(world.id, world, {valueEncoding: 'json'}, function(err) {
+        if (err) return cb(err)
+        user.copy(local, remote, cb)
+      })
     })
   }
     
