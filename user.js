@@ -1,7 +1,7 @@
 var levelUser = require('level-user')
 var request = require('browser-request')
 var gravatar = require('gravatar')
-var backend = "http://localhost:8080"
+var backend = "http://wzrd.in:9000"
 
 var username = window.location.hash.replace('#', '')
 if (username.length === 0) return window.location.href = "/"
