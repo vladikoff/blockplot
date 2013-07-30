@@ -139,7 +139,1723 @@ module.exports = function(user) {
   }
 }
 
-},{"concat-stream":24,"gravatar":25,"hat":27}],2:[function(require,module,exports){
+},{"concat-stream":25,"gravatar":26,"hat":28}],2:[function(require,module,exports){
+(function(){/*!
+ * Modernizr v3.0.0pre
+ * modernizr.com
+ *
+ * Copyright (c) Faruk Ates, Paul Irish, Alex Sexton, Ryan Seddon, Alexander Farkas, Ben Alman, Stu Cox
+ * MIT License
+ */ 
+/*
+ * Modernizr tests which native CSS3 and HTML5 features are available in the
+ * current UA and makes the results available to you in two ways: as properties on
+ * a global `Modernizr` object, and as classes on the `<html>` element. This
+ * information allows you to progressively enhance your pages with a granular level
+ * of control over the experience.
+ *
+ * Modernizr has an optional (*not included*) conditional resource loader called
+ * `Modernizr.load()`, based on [Yepnope.js](http://yepnopejs.com). You can get a
+ * build that includes `Modernizr.load()`, as well as choosing which feature tests
+ * to include on the [Download page](http://www.modernizr.com/download/).
+ */
+;(function(window, document, undefined){
+
+  var tests = [];
+  
+
+  var ModernizrProto = {
+    // The current version, dummy
+    _version: 'v3.0.0pre',
+
+    // Any settings that don't work as separate modules
+    // can go in here as configuration.
+    _config: {
+      classPrefix : '',
+      enableClasses : true
+    },
+
+    // Queue of tests
+    _q: [],
+
+    // Stub these for people who are listening
+    on: function( test, cb ) {
+      // I don't really think people should do this, but we can
+      // safe guard it a bit.
+      // -- NOTE:: this gets WAY overridden in src/addTest for
+      // actual async tests. This is in case people listen to
+      // synchronous tests. I would leave it out, but the code
+      // to *disallow* sync tests in the real version of this
+      // function is actually larger than this.
+      setTimeout(function() {
+        cb(this[test]);
+      }, 0);
+    },
+
+    addTest: function( name, fn, options ) {
+      tests.push({name : name, fn : fn, options : options });
+    },
+
+    addAsyncTest: function (fn) {
+      tests.push({name : null, fn : fn});
+    }
+  };
+
+  
+
+  // Fake some of Object.create
+  // so we can force non test results
+  // to be non "own" properties.
+  var Modernizr = function(){};
+  Modernizr.prototype = ModernizrProto;
+
+  // Leak modernizr globally when you `require` it
+  // rather than force it here.
+  // Overwrite name so constructor name is nicer :D
+  Modernizr = new Modernizr();
+
+  
+
+  var classes = [];
+  
+
+  /**
+   * is returns a boolean for if typeof obj is exactly type.
+   */
+  function is( obj, type ) {
+    return typeof obj === type;
+  }
+  ;
+
+  // Run through all tests and detect their support in the current UA.
+  function testRunner() {
+    var featureNames;
+    var feature;
+    var aliasIdx;
+    var result;
+    var nameIdx;
+    for ( var featureIdx in tests ) {
+      featureNames = [];
+      feature = tests[featureIdx];
+      // run the test, throw the return value into the Modernizr,
+      //   then based on that boolean, define an appropriate className
+      //   and push it into an array of classes we'll join later.
+      //
+      //   If there is no name, it's an 'async' test that is run,
+      //   but not directly added to the object. That should
+      //   be done with a post-run addTest call.
+      if ( feature.name ) {
+        featureNames.push(feature.name.toLowerCase());
+
+        if (feature.options && feature.options.aliases && feature.options.aliases.length) {
+          // Add all the aliases into the names list
+          for (aliasIdx = 0; aliasIdx < feature.options.aliases.length; aliasIdx++) {
+            featureNames.push(feature.options.aliases[aliasIdx].toLowerCase());
+          }
+        }
+      }
+
+      // Run the test, or use the raw value if it's not a function
+      result = is(feature.fn, 'function') ? feature.fn() : feature.fn;
+
+      // Set each of the names on the Modernizr object
+      for (nameIdx = 0; nameIdx < featureNames.length; nameIdx++) {
+        Modernizr[featureNames[nameIdx]] = result;
+        classes.push((Modernizr[featureNames[nameIdx]] ? '' : 'no-') + featureNames[nameIdx]);
+      }
+    }
+  }
+
+  ;
+
+  var docElement = document.documentElement;
+  
+
+  // Pass in an and array of class names, e.g.:
+  //  ['no-webp', 'borderradius', ...]
+  function setClasses( classes ) {
+    var className = docElement.className;
+    var removeClasses = [];
+    var regex;
+
+    // Change `no-js` to `js` (we do this regardles of the `enableClasses`
+    // option)
+    className = className.replace(/(^|\s)no-js(\s|$)/, '$1js$2');
+
+    if(Modernizr._config.enableClasses) {
+      // Need to remove any existing `no-*` classes for features we've detected
+      for(var i = 0; i < classes.length; i++) {
+        if(!classes[i].match('^no-')) {
+          removeClasses.push('no-' + classes[i]);
+        }
+      }
+
+      // Use a regex to remove the old...
+      regex = new RegExp('(^|\\s)' + removeClasses.join('|') + '(\\s|$)', 'g');
+      className = className.replace(regex, '$1$2');
+
+      // Then add the new...
+      className += ' ' + classes.join(' ' + (Modernizr._config.classPrefix || ''));
+
+      // Apply
+      docElement.className = className;
+    }
+
+  }
+
+  ;
+
+  // hasOwnProperty shim by kangax needed for Safari 2.0 support
+  var hasOwnProp;
+
+  (function() {
+    var _hasOwnProperty = ({}).hasOwnProperty;
+    if ( !is(_hasOwnProperty, 'undefined') && !is(_hasOwnProperty.call, 'undefined') ) {
+      hasOwnProp = function (object, property) {
+        return _hasOwnProperty.call(object, property);
+      };
+    }
+    else {
+      hasOwnProp = function (object, property) { /* yes, this can give false positives/negatives, but most of the time we don't care about those */
+        return ((property in object) && is(object.constructor.prototype[property], 'undefined'));
+      };
+    }
+  })();
+
+  
+
+  // As far as I can think of, we shouldn't need or
+  // allow 'on' for non-async tests, and you can't do
+  // async tests without this 'addTest' module.
+
+  // Listeners for async or post-run tests
+  ModernizrProto._l = {};
+
+  // 'addTest' implies a test after the core runloop,
+  // So we'll add in the events
+  ModernizrProto.on = function( test, cb ) {
+    // Create the list of listeners if it doesn't exist
+    if (!this._l[test]) {
+      this._l[test] = [];
+    }
+
+    // Push this test on to the listener list
+    this._l[test].push(cb);
+
+    // If it's already been resolved, trigger it on next tick
+    if (Modernizr.hasOwnProperty(test)) {
+      // Next Tick
+      setTimeout(function() {
+        Modernizr._trigger(test, Modernizr[test]);
+      }, 0);
+    }
+  };
+
+  ModernizrProto._trigger = function( test, res ) {
+    if (!this._l[test]) {
+      return;
+    }
+
+    var cbs = this._l[test];
+    var cb;
+    var i;
+
+    /* jshint -W083 */
+    for (i = 0; i < cbs.length; i++) {
+      cb = cbs[i];
+      // Force async
+      setTimeout(function() {
+        cb(res);
+      },0);
+    }
+
+    // Don't trigger these again
+    delete this._l[test];
+  };
+
+  /**
+   * addTest allows the user to define their own feature tests
+   * the result will be added onto the Modernizr object,
+   * as well as an appropriate className set on the html element
+   *
+   * @param feature - String naming the feature
+   * @param test - Function returning true if feature is supported, false if not
+   */
+  function addTest( feature, test ) {
+    if ( typeof feature == 'object' ) {
+      for ( var key in feature ) {
+        if ( hasOwnProp( feature, key ) ) {
+          addTest( key, feature[ key ] );
+        }
+      }
+    } else {
+
+      feature = feature.toLowerCase();
+
+      if ( Modernizr[feature] !== undefined ) {
+        // we're going to quit if you're trying to overwrite an existing test
+        // if we were to allow it, we'd do this:
+        //   var re = new RegExp("\\b(no-)?" + feature + "\\b");
+        //   docElement.className = docElement.className.replace( re, '' );
+        // but, no rly, stuff 'em.
+        return Modernizr;
+      }
+
+      test = typeof test == 'function' ? test() : test;
+
+      // Set the value (this is the magic, right here).
+      Modernizr[feature] = test;
+
+      // Set a single class (either `feature` or `no-feature`)
+      setClasses([(test ? '' : 'no-') + feature]);
+
+      // Trigger the event
+      Modernizr._trigger(feature, test);
+    }
+
+    return Modernizr; // allow chaining.
+  }
+
+  // After all the tests are run, add self
+  // to the Modernizr prototype
+  Modernizr._q.push(function() {
+    ModernizrProto.addTest = addTest;
+  });
+
+  
+
+  // Take the html5 variable out of the
+  // html5shiv scope so we can return it.
+  var html5;
+
+  /**
+   * @preserve HTML5 Shiv v3.6.2pre | @afarkas @jdalton @jon_neal @rem | MIT/GPL2 Licensed
+   */
+  ;(function(window, document) {
+  /*jshint evil:true */
+    /** version */
+    var version = '3.6.2';
+
+    /** Preset options */
+    var options = window.html5 || {};
+
+    /** Used to skip problem elements */
+    var reSkip = /^<|^(?:button|map|select|textarea|object|iframe|option|optgroup)$/i;
+
+    /** Not all elements can be cloned in IE **/
+    var saveClones = /^(?:a|b|code|div|fieldset|h1|h2|h3|h4|h5|h6|i|label|li|ol|p|q|span|strong|style|table|tbody|td|th|tr|ul)$/i;
+
+    /** Detect whether the browser supports default html5 styles */
+    var supportsHtml5Styles;
+
+    /** Name of the expando, to work with multiple documents or to re-shiv one document */
+    var expando = '_html5shiv';
+
+    /** The id for the the documents expando */
+    var expanID = 0;
+
+    /** Cached data for each document */
+    var expandoData = {};
+
+    /** Detect whether the browser supports unknown elements */
+    var supportsUnknownElements;
+
+    (function() {
+      try {
+        var a = document.createElement('a');
+        a.innerHTML = '<xyz></xyz>';
+        //if the hidden property is implemented we can assume, that the browser supports basic HTML5 Styles
+        supportsHtml5Styles = ('hidden' in a);
+
+        supportsUnknownElements = a.childNodes.length == 1 || (function() {
+          // assign a false positive if unable to shiv
+          (document.createElement)('a');
+          var frag = document.createDocumentFragment();
+          return (
+            typeof frag.cloneNode == 'undefined' ||
+            typeof frag.createDocumentFragment == 'undefined' ||
+            typeof frag.createElement == 'undefined'
+          );
+        }());
+      } catch(e) {
+        // assign a false positive if detection fails => unable to shiv
+        supportsHtml5Styles = true;
+        supportsUnknownElements = true;
+      }
+
+    }());
+
+    /*--------------------------------------------------------------------------*/
+
+    /**
+     * Creates a style sheet with the given CSS text and adds it to the document.
+     * @private
+     * @param {Document} ownerDocument The document.
+     * @param {String} cssText The CSS text.
+     * @returns {StyleSheet} The style element.
+     */
+    function addStyleSheet(ownerDocument, cssText) {
+      var p = ownerDocument.createElement('p'),
+          parent = ownerDocument.getElementsByTagName('head')[0] || ownerDocument.documentElement;
+
+      p.innerHTML = 'x<style>' + cssText + '</style>';
+      return parent.insertBefore(p.lastChild, parent.firstChild);
+    }
+
+    /**
+     * Returns the value of `html5.elements` as an array.
+     * @private
+     * @returns {Array} An array of shived element node names.
+     */
+    function getElements() {
+      var elements = html5.elements;
+      return typeof elements == 'string' ? elements.split(' ') : elements;
+    }
+
+      /**
+     * Returns the data associated to the given document
+     * @private
+     * @param {Document} ownerDocument The document.
+     * @returns {Object} An object of data.
+     */
+    function getExpandoData(ownerDocument) {
+      var data = expandoData[ownerDocument[expando]];
+      if (!data) {
+        data = {};
+        expanID++;
+        ownerDocument[expando] = expanID;
+        expandoData[expanID] = data;
+      }
+      return data;
+    }
+
+    /**
+     * returns a shived element for the given nodeName and document
+     * @memberOf html5
+     * @param {String} nodeName name of the element
+     * @param {Document} ownerDocument The context document.
+     * @returns {Object} The shived element.
+     */
+    function createElement(nodeName, ownerDocument, data){
+      if (!ownerDocument) {
+        ownerDocument = document;
+      }
+      if(supportsUnknownElements){
+        return ownerDocument.createElement(nodeName);
+      }
+      if (!data) {
+        data = getExpandoData(ownerDocument);
+      }
+      var node;
+
+      if (data.cache[nodeName]) {
+        node = data.cache[nodeName].cloneNode();
+      } else if (saveClones.test(nodeName)) {
+        node = (data.cache[nodeName] = data.createElem(nodeName)).cloneNode();
+      } else {
+        node = data.createElem(nodeName);
+      }
+
+      // Avoid adding some elements to fragments in IE < 9 because
+      // * Attributes like `name` or `type` cannot be set/changed once an element
+      //   is inserted into a document/fragment
+      // * Link elements with `src` attributes that are inaccessible, as with
+      //   a 403 response, will cause the tab/window to crash
+      // * Script elements appended to fragments will execute when their `src`
+      //   or `text` property is set
+      return node.canHaveChildren && !reSkip.test(nodeName) ? data.frag.appendChild(node) : node;
+    }
+
+    /**
+     * returns a shived DocumentFragment for the given document
+     * @memberOf html5
+     * @param {Document} ownerDocument The context document.
+     * @returns {Object} The shived DocumentFragment.
+     */
+    function createDocumentFragment(ownerDocument, data){
+      if (!ownerDocument) {
+        ownerDocument = document;
+      }
+      if(supportsUnknownElements){
+        return ownerDocument.createDocumentFragment();
+      }
+      data = data || getExpandoData(ownerDocument);
+      var clone = data.frag.cloneNode(),
+          i = 0,
+          elems = getElements(),
+          l = elems.length;
+      for(;i<l;i++){
+        clone.createElement(elems[i]);
+      }
+      return clone;
+    }
+
+    /**
+     * Shivs the `createElement` and `createDocumentFragment` methods of the document.
+     * @private
+     * @param {Document|DocumentFragment} ownerDocument The document.
+     * @param {Object} data of the document.
+     */
+    function shivMethods(ownerDocument, data) {
+      if (!data.cache) {
+        data.cache = {};
+        data.createElem = ownerDocument.createElement;
+        data.createFrag = ownerDocument.createDocumentFragment;
+        data.frag = data.createFrag();
+      }
+
+
+      ownerDocument.createElement = function(nodeName) {
+        //abort shiv
+        if (!html5.shivMethods) {
+          return data.createElem(nodeName);
+        }
+        return createElement(nodeName, ownerDocument, data);
+      };
+
+      ownerDocument.createDocumentFragment = Function('h,f', 'return function(){' +
+        'var n=f.cloneNode(),c=n.createElement;' +
+        'h.shivMethods&&(' +
+          // unroll the `createElement` calls
+          getElements().join().replace(/\w+/g, function(nodeName) {
+            data.createElem(nodeName);
+            data.frag.createElement(nodeName);
+            return 'c("' + nodeName + '")';
+          }) +
+        ');return n}'
+      )(html5, data.frag);
+    }
+
+    /*--------------------------------------------------------------------------*/
+
+    /**
+     * Shivs the given document.
+     * @memberOf html5
+     * @param {Document} ownerDocument The document to shiv.
+     * @returns {Document} The shived document.
+     */
+    function shivDocument(ownerDocument) {
+      if (!ownerDocument) {
+        ownerDocument = document;
+      }
+      var data = getExpandoData(ownerDocument);
+
+      if (html5.shivCSS && !supportsHtml5Styles && !data.hasCSS) {
+        data.hasCSS = !!addStyleSheet(ownerDocument,
+          // corrects block display not defined in IE6/7/8/9
+          'article,aside,figcaption,figure,footer,header,hgroup,main,nav,section{display:block}' +
+          // adds styling not present in IE6/7/8/9
+          'mark{background:#FF0;color:#000}'
+        );
+      }
+      if (!supportsUnknownElements) {
+        shivMethods(ownerDocument, data);
+      }
+      return ownerDocument;
+    }
+
+    /*--------------------------------------------------------------------------*/
+
+    /**
+     * The `html5` object is exposed so that more elements can be shived and
+     * existing shiving can be detected on iframes.
+     * @type Object
+     * @example
+     *
+     * // options can be changed before the script is included
+     * html5 = { 'elements': 'mark section', 'shivCSS': false, 'shivMethods': false };
+     */
+    html5 = {
+
+      /**
+       * An array or space separated string of node names of the elements to shiv.
+       * @memberOf html5
+       * @type Array|String
+       */
+      'elements': options.elements || 'abbr article aside audio bdi canvas data datalist details figcaption figure footer header hgroup main mark meter nav output progress section summary time video',
+
+      /**
+       * current version of html5shiv
+       */
+      'version': version,
+
+      /**
+       * A flag to indicate that the HTML5 style sheet should be inserted.
+       * @memberOf html5
+       * @type Boolean
+       */
+      'shivCSS': (options.shivCSS !== false),
+
+      /**
+       * Is equal to true if a browser supports creating unknown/HTML5 elements
+       * @memberOf html5
+       * @type boolean
+       */
+      'supportsUnknownElements': supportsUnknownElements,
+
+      /**
+       * A flag to indicate that the document's `createElement` and `createDocumentFragment`
+       * methods should be overwritten.
+       * @memberOf html5
+       * @type Boolean
+       */
+      'shivMethods': (options.shivMethods !== false),
+
+      /**
+       * A string to describe the type of `html5` object ("default" or "default print").
+       * @memberOf html5
+       * @type String
+       */
+      'type': 'default',
+
+      // shivs the document according to the specified `html5` object options
+      'shivDocument': shivDocument,
+
+      //creates a shived element
+      createElement: createElement,
+
+      //creates a shived documentFragment
+      createDocumentFragment: createDocumentFragment
+    };
+
+    /*--------------------------------------------------------------------------*/
+
+    // expose html5
+    window.html5 = html5;
+
+    // shiv the document
+    shivDocument(document);
+
+    /*------------------------------- Print Shiv -------------------------------*/
+
+    /** Used to filter media types */
+    var reMedia = /^$|\b(?:all|print)\b/;
+
+    /** Used to namespace printable elements */
+    var shivNamespace = 'html5shiv';
+
+    /** Detect whether the browser supports shivable style sheets */
+    var supportsShivableSheets = !supportsUnknownElements && (function() {
+      // assign a false negative if unable to shiv
+      var docEl = document.documentElement;
+      return !(
+        typeof document.namespaces == 'undefined' ||
+        typeof document.parentWindow == 'undefined' ||
+        typeof docEl.applyElement == 'undefined' ||
+        typeof docEl.removeNode == 'undefined' ||
+        typeof window.attachEvent == 'undefined'
+      );
+    }());
+
+    /*--------------------------------------------------------------------------*/
+
+    /**
+     * Wraps all HTML5 elements in the given document with printable elements.
+     * (eg. the "header" element is wrapped with the "html5shiv:header" element)
+     * @private
+     * @param {Document} ownerDocument The document.
+     * @returns {Array} An array wrappers added.
+     */
+    function addWrappers(ownerDocument) {
+      var node,
+          nodes = ownerDocument.getElementsByTagName('*'),
+          index = nodes.length,
+          reElements = RegExp('^(?:' + getElements().join('|') + ')$', 'i'),
+          result = [];
+
+      while (index--) {
+        node = nodes[index];
+        if (reElements.test(node.nodeName)) {
+          result.push(node.applyElement(createWrapper(node)));
+        }
+      }
+      return result;
+    }
+
+    /**
+     * Creates a printable wrapper for the given element.
+     * @private
+     * @param {Element} element The element.
+     * @returns {Element} The wrapper.
+     */
+    function createWrapper(element) {
+      var node,
+          nodes = element.attributes,
+          index = nodes.length,
+          wrapper = element.ownerDocument.createElement(shivNamespace + ':' + element.nodeName);
+
+      // copy element attributes to the wrapper
+      while (index--) {
+        node = nodes[index];
+        node.specified && wrapper.setAttribute(node.nodeName, node.nodeValue);
+      }
+      // copy element styles to the wrapper
+      wrapper.style.cssText = element.style.cssText;
+      return wrapper;
+    }
+
+    /**
+     * Shivs the given CSS text.
+     * (eg. header{} becomes html5shiv\:header{})
+     * @private
+     * @param {String} cssText The CSS text to shiv.
+     * @returns {String} The shived CSS text.
+     */
+    function shivCssText(cssText) {
+      var pair,
+          parts = cssText.split('{'),
+          index = parts.length,
+          reElements = RegExp('(^|[\\s,>+~])(' + getElements().join('|') + ')(?=[[\\s,>+~#.:]|$)', 'gi'),
+          replacement = '$1' + shivNamespace + '\\:$2';
+
+      while (index--) {
+        pair = parts[index] = parts[index].split('}');
+        pair[pair.length - 1] = pair[pair.length - 1].replace(reElements, replacement);
+        parts[index] = pair.join('}');
+      }
+      return parts.join('{');
+    }
+
+    /**
+     * Removes the given wrappers, leaving the original elements.
+     * @private
+     * @params {Array} wrappers An array of printable wrappers.
+     */
+    function removeWrappers(wrappers) {
+      var index = wrappers.length;
+      while (index--) {
+        wrappers[index].removeNode();
+      }
+    }
+
+    /*--------------------------------------------------------------------------*/
+
+    /**
+     * Shivs the given document for print.
+     * @memberOf html5
+     * @param {Document} ownerDocument The document to shiv.
+     * @returns {Document} The shived document.
+     */
+    function shivPrint(ownerDocument) {
+      var shivedSheet,
+          wrappers,
+          data = getExpandoData(ownerDocument),
+          namespaces = ownerDocument.namespaces,
+          ownerWindow = ownerDocument.parentWindow;
+
+      if (!supportsShivableSheets || ownerDocument.printShived) {
+        return ownerDocument;
+      }
+      if (typeof namespaces[shivNamespace] == 'undefined') {
+        namespaces.add(shivNamespace);
+      }
+
+      function removeSheet() {
+        clearTimeout(data._removeSheetTimer);
+        if (shivedSheet) {
+            shivedSheet.removeNode(true);
+        }
+        shivedSheet= null;
+      }
+
+      ownerWindow.attachEvent('onbeforeprint', function() {
+
+        removeSheet();
+
+        var imports,
+            length,
+            sheet,
+            collection = ownerDocument.styleSheets,
+            cssText = [],
+            index = collection.length,
+            sheets = Array(index);
+
+        // convert styleSheets collection to an array
+        while (index--) {
+          sheets[index] = collection[index];
+        }
+        // concat all style sheet CSS text
+        while ((sheet = sheets.pop())) {
+          // IE does not enforce a same origin policy for external style sheets...
+          // but has trouble with some dynamically created stylesheets
+          if (!sheet.disabled && reMedia.test(sheet.media)) {
+
+            try {
+              imports = sheet.imports;
+              length = imports.length;
+            } catch(er){
+              length = 0;
+            }
+
+            for (index = 0; index < length; index++) {
+              sheets.push(imports[index]);
+            }
+
+            try {
+              cssText.push(sheet.cssText);
+            } catch(er){}
+          }
+        }
+
+        // wrap all HTML5 elements with printable elements and add the shived style sheet
+        cssText = shivCssText(cssText.reverse().join(''));
+        wrappers = addWrappers(ownerDocument);
+        shivedSheet = addStyleSheet(ownerDocument, cssText);
+
+      });
+
+      ownerWindow.attachEvent('onafterprint', function() {
+        // remove wrappers, leaving the original elements, and remove the shived style sheet
+        removeWrappers(wrappers);
+        clearTimeout(data._removeSheetTimer);
+        data._removeSheetTimer = setTimeout(removeSheet, 500);
+      });
+
+      ownerDocument.printShived = true;
+      return ownerDocument;
+    }
+
+    /*--------------------------------------------------------------------------*/
+
+    // expose API
+    html5.type += ' print';
+    html5.shivPrint = shivPrint;
+
+    // shiv for print
+    shivPrint(document);
+
+  }(this, document));
+  
+
+// yepnope.js
+// Version - 1.5.4pre
+//
+// by
+// Alex Sexton - @SlexAxton - AlexSexton[at]gmail.com
+// Ralph Holzmann - @ralphholzmann - ralphholzmann[at]gmail.com
+//
+// http://yepnopejs.com/
+// https://github.com/SlexAxton/yepnope.js/
+//
+// Tri-license - WTFPL | MIT | BSD
+//
+// Please minify before use.
+// Also available as Modernizr.load via the Modernizr Project
+//
+( function ( window, doc, undef ) {
+
+var docElement            = doc.documentElement,
+    sTimeout              = window.setTimeout,
+    firstScript           = doc.getElementsByTagName( "script" )[ 0 ],
+    toString              = {}.toString,
+    execStack             = [],
+    started               = 0,
+    noop                  = function () {},
+    // Before you get mad about browser sniffs, please read:
+    // https://github.com/Modernizr/Modernizr/wiki/Undetectables
+    // If you have a better solution, we are actively looking to solve the problem
+    isGecko               = ( "MozAppearance" in docElement.style ),
+    isGeckoLTE18          = isGecko && !! doc.createRange().compareNode,
+    insBeforeObj          = isGeckoLTE18 ? docElement : firstScript.parentNode,
+    // Thanks to @jdalton for showing us this opera detection (by way of @kangax) (and probably @miketaylr too, or whatever...)
+    isOpera               = window.opera && toString.call( window.opera ) == "[object Opera]",
+    isIE                  = !! doc.attachEvent && !isOpera,
+    strJsElem             = isGecko ? "object" : isIE  ? "script" : "img",
+    strCssElem            = isIE ? "script" : strJsElem,
+    isArray               = Array.isArray || function ( obj ) {
+      return toString.call( obj ) == "[object Array]";
+    },
+    isObject              = function ( obj ) {
+      return Object(obj) === obj;
+    },
+    isString              = function ( s ) {
+      return typeof s == "string";
+    },
+    isFunction            = function ( fn ) {
+      return toString.call( fn ) == "[object Function]";
+    },
+    readFirstScript       = function() {
+        if (!firstScript || !firstScript.parentNode) {
+            firstScript = doc.getElementsByTagName( "script" )[ 0 ];
+        }
+    },
+    globalFilters         = [],
+    scriptCache           = {},
+    prefixes              = {
+      // key value pair timeout options
+      timeout : function( resourceObj, prefix_parts ) {
+        if ( prefix_parts.length ) {
+          resourceObj['timeout'] = prefix_parts[ 0 ];
+        }
+        return resourceObj;
+      }
+    },
+    handler,
+    yepnope;
+
+  /* Loader helper functions */
+  function isFileReady ( readyState ) {
+    // Check to see if any of the ways a file can be ready are available as properties on the file's element
+    return ( ! readyState || readyState == "loaded" || readyState == "complete" || readyState == "uninitialized" );
+  }
+
+
+  // Takes a preloaded js obj (changes in different browsers) and injects it into the head
+  // in the appropriate order
+  function injectJs ( src, cb, attrs, timeout, /* internal use */ err, internal ) {
+
+    var script = doc.createElement( "script" ),
+        done, i;
+
+    timeout = timeout || yepnope['errorTimeout'];
+
+    script.src = src;
+
+    // Add our extra attributes to the script element
+    for ( i in attrs ) {
+        script.setAttribute( i, attrs[ i ] );
+    }
+
+    cb = internal ? executeStack : ( cb || noop );
+
+    // Bind to load events
+    script.onreadystatechange = script.onload = function () {
+
+      if ( ! done && isFileReady( script.readyState ) ) {
+
+        // Set done to prevent this function from being called twice.
+        done = 1;
+        cb();
+
+        // Handle memory leak in IE
+        script.onload = script.onreadystatechange = null;
+      }
+    };
+
+    // 404 Fallback
+    sTimeout(function () {
+      if ( ! done ) {
+        done = 1;
+        // Might as well pass in an error-state if we fire the 404 fallback
+        cb(1);
+      }
+    }, timeout );
+
+    // Inject script into to document
+    // or immediately callback if we know there
+    // was previously a timeout error
+    readFirstScript();
+    err ? script.onload() : firstScript.parentNode.insertBefore( script, firstScript );
+  }
+
+  // Takes a preloaded css obj (changes in different browsers) and injects it into the head
+  function injectCss ( href, cb, attrs, timeout, /* Internal use */ err, internal ) {
+
+    // Create stylesheet link
+    var link = doc.createElement( "link" ),
+        done, i;
+
+    timeout = timeout || yepnope['errorTimeout'];
+
+    cb = internal ? executeStack : ( cb || noop );
+
+    // Add attributes
+    link.href = href;
+    link.rel  = "stylesheet";
+    link.type = "text/css";
+
+    // Add our extra attributes to the link element
+    for ( i in attrs ) {
+      link.setAttribute( i, attrs[ i ] );
+    }
+
+    if ( ! err ) {
+      readFirstScript();
+      firstScript.parentNode.insertBefore( link, firstScript );
+      sTimeout(cb, 0);
+    }
+  }
+
+  function executeStack ( ) {
+    // shift an element off of the stack
+    var i   = execStack.shift();
+    started = 1;
+
+    // if a is truthy and the first item in the stack has an src
+    if ( i ) {
+      // if it's a script, inject it into the head with no type attribute
+      if ( i['t'] ) {
+        // Inject after a timeout so FF has time to be a jerk about it and
+        // not double load (ignore the cache)
+        sTimeout( function () {
+          (i['t'] == "c" ?  yepnope['injectCss'] : yepnope['injectJs'])( i['s'], 0, i['a'], i['x'], i['e'], 1 );
+        }, 0 );
+      }
+      // Otherwise, just call the function and potentially run the stack
+      else {
+        i();
+        executeStack();
+      }
+    }
+    else {
+      // just reset out of recursive mode
+      started = 0;
+    }
+  }
+
+  function preloadFile ( elem, url, type, splicePoint, dontExec, attrObj, timeout ) {
+
+    timeout = timeout || yepnope['errorTimeout'];
+
+    // Create appropriate element for browser and type
+    var preloadElem = doc.createElement( elem ),
+        done        = 0,
+        firstFlag   = 0,
+        stackObject = {
+          "t": type,     // type
+          "s": url,      // src
+        //r: 0,        // ready
+          "e": dontExec,// set to true if we don't want to reinject
+          "a": attrObj,
+          "x": timeout
+        };
+
+    // The first time (common-case)
+    if ( scriptCache[ url ] === 1 ) {
+      firstFlag = 1;
+      scriptCache[ url ] = [];
+    }
+
+    function onload ( first ) {
+      // If the script/css file is loaded
+      if ( ! done && isFileReady( preloadElem.readyState ) ) {
+
+        // Set done to prevent this function from being called twice.
+        stackObject['r'] = done = 1;
+
+        ! started && executeStack();
+
+        if ( first ) {
+          if ( elem != "img" ) {
+            sTimeout( function () {
+                insBeforeObj.removeChild( preloadElem );
+              }, 50);
+          }
+
+          for ( var i in scriptCache[ url ] ) {
+            if ( scriptCache[ url ].hasOwnProperty( i ) ) {
+              scriptCache[ url ][ i ].onload();
+            }
+          }
+
+          // Handle memory leak in IE
+           preloadElem.onload = preloadElem.onreadystatechange = null;
+        }
+      }
+    }
+
+
+    // Setting url to data for objects or src for img/scripts
+    if ( elem == "object" ) {
+      preloadElem.data = url;
+
+      // Setting the type attribute to stop Firefox complaining about the mimetype when running locally.
+      // The type doesn't matter as long as it's real, thus text/css instead of text/javascript.
+      preloadElem.setAttribute("type", "text/css");
+    } else {
+      preloadElem.src = url;
+
+      // Setting bogus script type to allow the script to be cached
+      preloadElem.type = elem;
+    }
+
+    // Don't let it show up visually
+    preloadElem.width = preloadElem.height = "0";
+
+    // Attach handlers for all browsers
+    preloadElem.onerror = preloadElem.onload = preloadElem.onreadystatechange = function(){
+      onload.call(this, firstFlag);
+    };
+    // inject the element into the stack depending on if it's
+    // in the middle of other scripts or not
+    execStack.splice( splicePoint, 0, stackObject );
+
+    // The only place these can't go is in the <head> element, since objects won't load in there
+    // so we have two options - insert before the head element (which is hard to assume) - or
+    // insertBefore technically takes null/undefined as a second param and it will insert the element into
+    // the parent last. We try the head, and it automatically falls back to undefined.
+    if ( elem != "img" ) {
+      // If it's the first time, or we've already loaded it all the way through
+      if ( firstFlag || scriptCache[ url ] === 2 ) {
+        readFirstScript();
+        insBeforeObj.insertBefore( preloadElem, isGeckoLTE18 ? null : firstScript );
+
+        // If something fails, and onerror doesn't fire,
+        // continue after a timeout.
+        sTimeout( onload, timeout );
+      }
+      else {
+        // instead of injecting, just hold on to it
+        scriptCache[ url ].push( preloadElem );
+      }
+    }
+  }
+
+  function load ( resource, type, dontExec, attrObj, timeout ) {
+    // If this method gets hit multiple times, we should flag
+    // that the execution of other threads should halt.
+    started = 0;
+
+    // We'll do 'j' for js and 'c' for css, yay for unreadable minification tactics
+    type = type || "j";
+    if ( isString( resource ) ) {
+      // if the resource passed in here is a string, preload the file
+      preloadFile( type == "c" ? strCssElem : strJsElem, resource, type, this['i']++, dontExec, attrObj, timeout );
+    } else {
+      // Otherwise it's a callback function and we can splice it into the stack to run
+      execStack.splice( this['i']++, 0, resource );
+      execStack.length == 1 && executeStack();
+    }
+
+    // OMG is this jQueries? For chaining...
+    return this;
+  }
+
+  // return the yepnope object with a fresh loader attached
+  function getYepnope () {
+    var y = yepnope;
+    y['loader'] = {
+      "load": load,
+      "i" : 0
+    };
+    return y;
+  }
+
+  /* End loader helper functions */
+  // Yepnope Function
+  yepnope = function ( needs ) {
+
+    var i,
+        need,
+        // start the chain as a plain instance
+        chain = this['yepnope']['loader'];
+
+    function satisfyPrefixes ( url ) {
+      // split all prefixes out
+      var parts   = url.split( "!" ),
+      gLen    = globalFilters.length,
+      origUrl = parts.pop(),
+      pLen    = parts.length,
+      res     = {
+        "url"      : origUrl,
+        // keep this one static for callback variable consistency
+        "origUrl"  : origUrl,
+        "prefixes" : parts
+      },
+      mFunc,
+      j,
+      prefix_parts;
+
+      // loop through prefixes
+      // if there are none, this automatically gets skipped
+      for ( j = 0; j < pLen; j++ ) {
+        prefix_parts = parts[ j ].split( '=' );
+        mFunc = prefixes[ prefix_parts.shift() ];
+        if ( mFunc ) {
+          res = mFunc( res, prefix_parts );
+        }
+      }
+
+      // Go through our global filters
+      for ( j = 0; j < gLen; j++ ) {
+        res = globalFilters[ j ]( res );
+      }
+
+      // return the final url
+      return res;
+    }
+
+     function getExtension ( url ) {
+      //The extension is always the last characters before the ? and after a period.
+      //The previous method was not accounting for the possibility of a period in the query string.
+      var b = url.split('?')[0];
+      return b.substr(b.lastIndexOf('.')+1);
+    }
+
+    function loadScriptOrStyle ( input, callback, chain, index, testResult ) {
+      // run through our set of prefixes
+      var resource     = satisfyPrefixes( input ),
+          autoCallback = resource['autoCallback'],
+          extension    = getExtension( resource['url'] );
+
+      // if no object is returned or the url is empty/0 just exit the load
+      if ( resource['bypass'] ) {
+        return;
+      }
+
+      // Determine callback, if any
+      if ( callback ) {
+        callback = isFunction( callback ) ?
+          callback :
+          callback[ input ] ||
+          callback[ index ] ||
+          callback[ ( input.split( "/" ).pop().split( "?" )[ 0 ] ) ];
+      }
+
+      // if someone is overriding all normal functionality
+      if ( resource['instead'] ) {
+        return resource['instead']( input, callback, chain, index, testResult );
+      }
+      else {
+        // Handle if we've already had this url and it's completed loaded already
+        if ( scriptCache[ resource['url'] ] && resource['reexecute'] !== true) {
+          // don't let this execute again
+          resource['noexec'] = true;
+        }
+        else {
+          scriptCache[ resource['url'] ] = 1;
+        }
+
+        // Throw this into the queue
+        input && chain.load( resource['url'], ( ( resource['forceCSS'] || ( ! resource['forceJS'] && "css" == getExtension( resource['url'] ) ) ) ) ? "c" : undef, resource['noexec'], resource['attrs'], resource['timeout'] );
+
+        // If we have a callback, we'll start the chain over
+        if ( isFunction( callback ) || isFunction( autoCallback ) ) {
+          // Call getJS with our current stack of things
+          chain['load']( function () {
+            // Hijack yepnope and restart index counter
+            getYepnope();
+            // Call our callbacks with this set of data
+            callback && callback( resource['origUrl'], testResult, index );
+            autoCallback && autoCallback( resource['origUrl'], testResult, index );
+
+            // Override this to just a boolean positive
+            scriptCache[ resource['url'] ] = 2;
+          } );
+        }
+      }
+    }
+
+    function loadFromTestObject ( testObject, chain ) {
+        var testResult = !! testObject['test'],
+            group      = testResult ? testObject['yep'] : testObject['nope'],
+            always     = testObject['load'] || testObject['both'],
+            callback   = testObject['callback'] || noop,
+            cbRef      = callback,
+            complete   = testObject['complete'] || noop,
+            needGroupSize;
+
+        // Reusable function for dealing with the different input types
+        // NOTE:: relies on closures to keep 'chain' up to date, a bit confusing, but
+        // much smaller than the functional equivalent in this case.
+        function handleGroup ( needGroup, moreToCome ) {
+          /* jshint -W083 */
+          if ( '' !== needGroup && ! needGroup ) {
+            // Call the complete callback when there's nothing to load.
+            ! moreToCome && complete();
+          }
+          // If it's a string
+          else if ( isString( needGroup ) ) {
+            // if it's a string, it's the last
+            if ( !moreToCome ) {
+              // Add in the complete callback to go at the end
+              callback = function () {
+                var args = [].slice.call( arguments );
+                cbRef.apply( this, args );
+                complete();
+              };
+            }
+            // Just load the script of style
+            loadScriptOrStyle( needGroup, callback, chain, 0, testResult );
+          }
+          // See if we have an object. Doesn't matter if it's an array or a key/val hash
+          // Note:: order cannot be guaranteed on an key value object with multiple elements
+          // since the for-in does not preserve order. Arrays _should_ go in order though.
+          else if ( isObject( needGroup ) ) {
+            // I hate this, but idk another way for objects.
+            needGroupSize = (function(){
+              var count = 0, i;
+              for (i in needGroup ) {
+                if ( needGroup.hasOwnProperty( i ) ) {
+                  count++;
+                }
+              }
+              return count;
+            })();
+
+            for ( var callbackKey in needGroup ) {
+              // Safari 2 does not have hasOwnProperty, but not worth the bytes for a shim
+              // patch if needed. Kangax has a nice shim for it. Or just remove the check
+              // and promise not to extend the object prototype.
+              if ( needGroup.hasOwnProperty( callbackKey ) ) {
+                // Find the last added resource, and append to it's callback.
+                if ( ! moreToCome && ! ( --needGroupSize ) ) {
+                  // If this is an object full of callbacks
+                  if ( ! isFunction( callback ) ) {
+                    // Add in the complete callback to go at the end
+                    callback[ callbackKey ] = (function( innerCb ) {
+                      return function () {
+                        var args = [].slice.call( arguments );
+                        innerCb && innerCb.apply( this, args );
+                        complete();
+                      };
+                    })( cbRef[ callbackKey ] );
+                  }
+                  // If this is just a single callback
+                  else {
+                    callback = function () {
+                      var args = [].slice.call( arguments );
+                      cbRef.apply( this, args );
+                      complete();
+                    };
+                  }
+                }
+                loadScriptOrStyle( needGroup[ callbackKey ], callback, chain, callbackKey, testResult );
+              }
+            }
+          }
+        }
+
+        // figure out what this group should do
+        handleGroup( group, !!always || !!testObject['complete']);
+
+        // Run our loader on the load/both group too
+        // the always stuff always loads second.
+        always && handleGroup( always );
+
+  // If complete callback is used without loading anything
+        !always && !!testObject['complete'] && handleGroup('');
+
+    }
+
+    // Someone just decides to load a single script or css file as a string
+    if ( isString( needs ) ) {
+      loadScriptOrStyle( needs, 0, chain, 0 );
+    }
+    // Normal case is likely an array of different types of loading options
+    else if ( isArray( needs ) ) {
+      // go through the list of needs
+      for( i = 0; i < needs.length; i++ ) {
+        need = needs[ i ];
+
+        // if it's a string, just load it
+        if ( isString( need ) ) {
+          loadScriptOrStyle( need, 0, chain, 0 );
+        }
+        // if it's an array, call our function recursively
+        else if ( isArray( need ) ) {
+          yepnope( need );
+        }
+        // if it's an object, use our modernizr logic to win
+        else if ( isObject( need ) ) {
+          loadFromTestObject( need, chain );
+        }
+      }
+    }
+    // Allow a single object to be passed in
+    else if ( isObject( needs ) ) {
+      loadFromTestObject( needs, chain );
+    }
+  };
+
+  // This publicly exposed function is for allowing
+  // you to add functionality based on prefixes on the
+  // string files you add. 'css!' is a builtin prefix
+  //
+  // The arguments are the prefix (not including the !) as a string
+  // and
+  // A callback function. This function is passed a resource object
+  // that can be manipulated and then returned. (like middleware. har.)
+  //
+  // Examples of this can be seen in the officially supported ie prefix
+  yepnope['addPrefix'] = function ( prefix, callback ) {
+    prefixes[ prefix ] = callback;
+  };
+
+  // A filter is a global function that every resource
+  // object that passes through yepnope will see. You can
+  // of course conditionally choose to modify the resource objects
+  // or just pass them along. The filter function takes the resource
+  // object and is expected to return one.
+  //
+  // The best example of a filter is the 'autoprotocol' officially
+  // supported filter
+  yepnope['addFilter'] = function ( filter ) {
+    globalFilters.push( filter );
+  };
+
+  // Default error timeout to 10sec - modify to alter
+  yepnope['errorTimeout'] = 1e4;
+
+  // Webreflection readystate hack
+  // safe for jQuery 1.4+ ( i.e. don't use yepnope with jQuery 1.3.2 )
+  // if the readyState is null and we have a listener
+  if ( doc.readyState == null && doc.addEventListener ) {
+    // set the ready state to loading
+    doc.readyState = "loading";
+    // call the listener
+    doc.addEventListener( "DOMContentLoaded", handler = function () {
+      // Remove the listener
+      doc.removeEventListener( "DOMContentLoaded", handler, 0 );
+      // Set it to ready
+      doc.readyState = "complete";
+    }, 0 );
+  }
+
+  // Attach loader &
+  // Leak it
+  window['yepnope'] = getYepnope();
+
+  // Exposing executeStack to better facilitate plugins
+  window['yepnope']['executeStack'] = executeStack;
+  window['yepnope']['injectJs'] = injectJs;
+  window['yepnope']['injectCss'] = injectCss;
+
+})( window, document );
+
+// Reappropriate
+ModernizrProto['load'] = function() {
+  window['yepnope'].apply(window, [].slice.call(arguments,0));
+};
+
+
+
+  /**
+   * contains returns a boolean for if substr is found within str.
+   */
+  function contains( str, substr ) {
+    return !!~('' + str).indexOf(substr);
+  }
+
+  ;
+
+  var createElement = function() {
+    return document.createElement.apply(document, arguments);
+  };
+  
+
+  /**
+   * Create our "modernizr" element that we do most feature tests on.
+   */
+  var modElem = {
+    elem : createElement('modernizr')
+  };
+
+  // Clean up this element
+  Modernizr._q.push(function() {
+    delete modElem.elem;
+  });
+
+  
+
+  var mStyle = {
+    style : modElem.elem.style
+  };
+
+  // kill ref for gc, must happen before
+  // mod.elem is removed, so we unshift on to
+  // the front of the queue.
+  Modernizr._q.unshift(function() {
+    delete mStyle.style;
+  });
+
+  
+
+  // testProps is a generic CSS / DOM property test.
+
+  // In testing support for a given CSS property, it's legit to test:
+  //    `elem.style[styleName] !== undefined`
+  // If the property is supported it will return an empty string,
+  // if unsupported it will return undefined.
+
+  // We'll take advantage of this quick test and skip setting a style
+  // on our modernizr element, but instead just testing undefined vs
+  // empty string.
+
+  // Because the testing of the CSS property names (with "-", as
+  // opposed to the camelCase DOM properties) is non-portable and
+  // non-standard but works in WebKit and IE (but not Gecko or Opera),
+  // we explicitly reject properties with dashes so that authors
+  // developing in WebKit or IE first don't end up with
+  // browser-specific content by accident.
+
+  function testProps( props, prefixed ) {
+    var afterInit;
+
+    // If we don't have a style element, that means
+    // we're running async or after the core tests,
+    // so we'll need to create our own elements to use
+    if ( !mStyle.style ) {
+      afterInit = true;
+      mStyle.modElem = createElement('modernizr');
+      mStyle.style = mStyle.modElem.style;
+    }
+
+    // Delete the objects if we
+    // we created them.
+    function cleanElems() {
+      if (afterInit) {
+        delete mStyle.style;
+        delete mStyle.modElem;
+      }
+    }
+
+    for ( var i in props ) {
+      var prop = props[i];
+      if ( !contains(prop, "-") && mStyle.style[prop] !== undefined ) {
+        cleanElems();
+        return prefixed == 'pfx' ? prop : true;
+      }
+    }
+    cleanElems();
+    return false;
+  }
+
+  ;
+
+  // Modernizr.testProp() investigates whether a given style property is recognized
+  // Note that the property names must be provided in the camelCase variant.
+  // Modernizr.testProp('pointerEvents')
+  var testProp = ModernizrProto.testProp = function( prop ) {
+    return testProps([prop]);
+  };
+  
+
+  var slice = classes.slice;
+  
+
+  // Adapted from ES5-shim https://github.com/kriskowal/es5-shim/blob/master/es5-shim.js
+  // es5.github.com/#x15.3.4.5
+
+  if (!Function.prototype.bind) {
+    Function.prototype.bind = function bind(that) {
+
+      var target = this;
+
+      if (typeof target != "function") {
+        throw new TypeError();
+      }
+
+      var args = slice.call(arguments, 1);
+      var bound = function() {
+
+        if (this instanceof bound) {
+
+          var F = function(){};
+          F.prototype = target.prototype;
+          var self = new F();
+
+          var result = target.apply(
+            self,
+            args.concat(slice.call(arguments))
+          );
+          if (Object(result) === result) {
+            return result;
+          }
+          return self;
+
+        } else {
+
+          return target.apply(
+            that,
+            args.concat(slice.call(arguments))
+          );
+
+        }
+
+      };
+
+      return bound;
+    };
+  }
+
+  ;
+
+  // Following spec is to expose vendor-specific style properties as:
+  //   elem.style.WebkitBorderRadius
+  // and the following would be incorrect:
+  //   elem.style.webkitBorderRadius
+
+  // Webkit ghosts their properties in lowercase but Opera & Moz do not.
+  // Microsoft uses a lowercase `ms` instead of the correct `Ms` in IE8+
+  //   erik.eae.net/archives/2008/03/10/21.48.10/
+
+  // More here: github.com/Modernizr/Modernizr/issues/issue/21
+  var omPrefixes = 'Webkit Moz O ms';
+  
+
+  var cssomPrefixes = omPrefixes.split(' ');
+  ModernizrProto._cssomPrefixes = cssomPrefixes;
+  
+
+  var domPrefixes = omPrefixes.toLowerCase().split(' ');
+  ModernizrProto._domPrefixes = domPrefixes;
+  
+
+  /**
+   * testDOMProps is a generic DOM property test; if a browser supports
+   *   a certain property, it won't return undefined for it.
+   */
+  function testDOMProps( props, obj, elem ) {
+    var item;
+
+    for ( var i in props ) {
+      if ( props[i] in obj ) {
+
+        // return the property name as a string
+        if (elem === false) return props[i];
+
+        item = obj[props[i]];
+
+        // let's bind a function (and it has a bind method -- certain native objects that report that they are a
+        // function don't [such as webkitAudioContext])
+        if (is(item, 'function') && 'bind' in item){
+          // default to autobind unless override
+          return item.bind(elem || obj);
+        }
+
+        // return the unbound function or obj or value
+        return item;
+      }
+    }
+    return false;
+  }
+
+  ;
+
+  /**
+   * testPropsAll tests a list of DOM properties we want to check against.
+   *   We specify literally ALL possible (known and/or likely) properties on
+   *   the element including the non-vendor prefixed one, for forward-
+   *   compatibility.
+   */
+  function testPropsAll( prop, prefixed, elem ) {
+
+    var ucProp  = prop.charAt(0).toUpperCase() + prop.slice(1),
+    props   = (prop + ' ' + cssomPrefixes.join(ucProp + ' ') + ucProp).split(' ');
+
+    // did they call .prefixed('boxSizing') or are we just testing a prop?
+    if(is(prefixed, "string") || is(prefixed, "undefined")) {
+      return testProps(props, prefixed);
+
+      // otherwise, they called .prefixed('requestAnimationFrame', window[, elem])
+    } else {
+      props = (prop + ' ' + (domPrefixes).join(ucProp + ' ') + ucProp).split(' ');
+      return testDOMProps(props, prefixed, elem);
+    }
+  }
+
+  // Modernizr.testAllProps() investigates whether a given style property,
+  //   or any of its vendor-prefixed variants, is recognized
+  // Note that the property names must be provided in the camelCase variant.
+  // Modernizr.testAllProps('boxSizing')
+  ModernizrProto.testAllProps = testPropsAll;
+
+  
+
+  // Modernizr.prefixed() returns the prefixed or nonprefixed property name variant of your input
+  // Modernizr.prefixed('boxSizing') // 'MozBoxSizing'
+
+  // Properties must be passed as dom-style camelcase, rather than `box-sizing` hypentated style.
+  // Return values will also be the camelCase variant, if you need to translate that to hypenated style use:
+  //
+  //     str.replace(/([A-Z])/g, function(str,m1){ return '-' + m1.toLowerCase(); }).replace(/^ms-/,'-ms-');
+
+  // If you're trying to ascertain which transition end event to bind to, you might do something like...
+  //
+  //     var transEndEventNames = {
+  //       'WebkitTransition' : 'webkitTransitionEnd',
+  //       'MozTransition'    : 'transitionend',
+  //       'OTransition'      : 'oTransitionEnd',
+  //       'msTransition'     : 'MSTransitionEnd',
+  //       'transition'       : 'transitionend'
+  //     },
+  //     transEndEventName = transEndEventNames[ Modernizr.prefixed('transition') ];
+
+  var prefixed = ModernizrProto.prefixed = function( prop, obj, elem ) {
+    if (!obj) {
+      return testPropsAll(prop, 'pfx');
+    } else {
+      // Testing DOM property e.g. Modernizr.prefixed('requestAnimationFrame', window) // 'mozRequestAnimationFrame'
+      return testPropsAll(prop, obj, elem);
+    }
+  };
+
+  
+/*!
+{
+  "name": "Pointer Lock API",
+  "property": "pointerlock",
+  "notes": [{
+    "name": "MDN documentation",
+    "href": "https://developer.mozilla.org/en-US/docs/API/Pointer_Lock_API"
+  }]
+}
+!*/
+
+  // https://developer.mozilla.org/en-US/docs/API/Pointer_Lock_API
+  Modernizr.addTest('pointerlock', !!prefixed('exitPointerLock', document));
+
+/*!
+{
+  "name": "WebGL",
+  "property": "webgl",
+  "caniuse": "webgl",
+  "tags": ["webgl", "graphics"],
+  "polyfills": ["jebgl", "webglcompat", "cwebgl", "iewebgl"]
+}
+!*/
+
+  // webk.it/70117 is tracking a legit WebGL feature detect proposal
+  Modernizr.addTest('webgl', !!window.WebGLRenderingContext);
+
+/*!
+{
+  "name": "IndexedDB",
+  "property": "indexeddb",
+  "caniuse": "indexeddb",
+  "tags": ["storage"],
+  "polyfills": ["indexeddb"]
+}
+!*/
+/* DOC
+
+Detects support for the IndexedDB client-side storage API (final spec).
+
+*/
+
+  // Vendors had inconsistent prefixing with the experimental Indexed DB:
+  // - Webkit's implementation is accessible through webkitIndexedDB
+  // - Firefox shipped moz_indexedDB before FF4b9, but since then has been mozIndexedDB
+  // For speed, we don't test the legacy (and beta-only) indexedDB
+
+  Modernizr.addTest('indexeddb', !!prefixed("indexedDB", window));
+
+
+  // Run each test
+  testRunner();
+
+  // Remove the "no-js" class if it exists
+  setClasses(classes);
+
+  delete ModernizrProto.addTest;
+  delete ModernizrProto.addAsyncTest;
+
+  // Run the things that are supposed to run after the tests
+  for (var i = 0; i < Modernizr._q.length; i++) {
+    Modernizr._q[i]();
+  }
+
+  // Leak Modernizr namespace
+  window.Modernizr = Modernizr;
+  module.exports = Modernizr
+
+
+
+
+})(this, document);
+})()
+},{}],3:[function(require,module,exports){
 module.exports = function() {
   // parallax junk:
 
@@ -206,8 +1922,19 @@ module.exports = function() {
   });  // each data-type
 }
 
-},{}],3:[function(require,module,exports){
+},{}],4:[function(require,module,exports){
 require('./js/parallax')()
+var Modernizr = require('./js/modernizr-pointerlock-webgl')
+var startArea = $('.start-area')
+var missingAPIs = []
+if (!Modernizr.pointerlock) missingAPIs.push('Pointer Lock')
+if (!Modernizr.webgl) missingAPIs.push('WebGL')
+if (!Modernizr.indexeddb) missingAPIs.push('IndexedDB')
+if (missingAPIs.length > 0) {
+  startArea.html('<a href="http://google.com/chrome" target="_blank" class="btn btn-large btn-block btn-danger">Browser Upgrade Needed</a><span class="micro">Missing ' + missingAPIs.join(', ') + '</span>')
+}
+
+startArea.removeClass('hidden')
 
 var levelUser = require('level-user')
 var commonStuff = require('./js/common')
@@ -219,15 +1946,7 @@ user.getProfile(function(err, profile) {
   commonStuff(user)
 })
 
-var video = document.querySelector('video')
-console.log(video)
-video.onended = function () {
-  console.log('ended')
-  this.currentTime = 0
-  this.play()
-}
-
-},{"./js/common":1,"./js/parallax":2,"level-user":28}],4:[function(require,module,exports){
+},{"./js/common":1,"./js/modernizr-pointerlock-webgl":2,"./js/parallax":3,"level-user":29}],5:[function(require,module,exports){
 (function(){// UTILITY
 var util = require('util');
 var Buffer = require("buffer").Buffer;
@@ -544,7 +2263,7 @@ assert.doesNotThrow = function(block, /*optional*/error, /*optional*/message) {
 assert.ifError = function(err) { if (err) {throw err;}};
 
 })()
-},{"buffer":11,"util":9}],5:[function(require,module,exports){
+},{"buffer":12,"util":10}],6:[function(require,module,exports){
 (function(process){if (!process.EventEmitter) process.EventEmitter = function () {};
 
 var EventEmitter = exports.EventEmitter = process.EventEmitter;
@@ -730,7 +2449,7 @@ EventEmitter.prototype.listeners = function(type) {
 };
 
 })(require("__browserify_process"))
-},{"__browserify_process":23}],6:[function(require,module,exports){
+},{"__browserify_process":24}],7:[function(require,module,exports){
 
 /**
  * Object#toString() ref for stringify().
@@ -1049,7 +2768,7 @@ function decode(str) {
   }
 }
 
-},{}],7:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 var events = require('events');
 var util = require('util');
 
@@ -1170,7 +2889,7 @@ Stream.prototype.pipe = function(dest, options) {
   return dest;
 };
 
-},{"events":5,"util":9}],8:[function(require,module,exports){
+},{"events":6,"util":10}],9:[function(require,module,exports){
 var punycode = { encode : function (s) { return s } };
 
 exports.parse = urlParse;
@@ -1776,7 +3495,7 @@ function parseHost(host) {
   return out;
 }
 
-},{"querystring":6}],9:[function(require,module,exports){
+},{"querystring":7}],10:[function(require,module,exports){
 var events = require('events');
 
 exports.isArray = isArray;
@@ -2129,7 +3848,7 @@ exports.format = function(f) {
   return str;
 };
 
-},{"events":5}],10:[function(require,module,exports){
+},{"events":6}],11:[function(require,module,exports){
 exports.readIEEE754 = function(buffer, offset, isBE, mLen, nBytes) {
   var e, m,
       eLen = nBytes * 8 - mLen - 1,
@@ -2215,7 +3934,7 @@ exports.writeIEEE754 = function(buffer, value, offset, isBE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128;
 };
 
-},{}],11:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 (function(){var assert = require('assert');
 exports.Buffer = Buffer;
 exports.SlowBuffer = Buffer;
@@ -3299,7 +5018,7 @@ Buffer.prototype.writeDoubleBE = function(value, offset, noAssert) {
 };
 
 })()
-},{"./buffer_ieee754":10,"assert":4,"base64-js":12}],12:[function(require,module,exports){
+},{"./buffer_ieee754":11,"assert":5,"base64-js":13}],13:[function(require,module,exports){
 (function (exports) {
 	'use strict';
 
@@ -3385,7 +5104,7 @@ Buffer.prototype.writeDoubleBE = function(value, offset, noAssert) {
 	module.exports.fromByteArray = uint8ToBase64;
 }());
 
-},{}],13:[function(require,module,exports){
+},{}],14:[function(require,module,exports){
 (function(){var Buffer = require('buffer').Buffer
 var sha = require('./sha')
 var rng = require('./rng')
@@ -3468,7 +5187,7 @@ each(['createCredentials'
 })
 
 })()
-},{"./md5":14,"./rng":15,"./sha":16,"buffer":11}],14:[function(require,module,exports){
+},{"./md5":15,"./rng":16,"./sha":17,"buffer":12}],15:[function(require,module,exports){
 /*
  * A JavaScript implementation of the RSA Data Security, Inc. MD5 Message
  * Digest Algorithm, as defined in RFC 1321.
@@ -3854,7 +5573,7 @@ exports.hex_md5 = hex_md5;
 exports.b64_md5 = b64_md5;
 exports.any_md5 = any_md5;
 
-},{}],15:[function(require,module,exports){
+},{}],16:[function(require,module,exports){
 // Original code adapted from Robert Kieffer.
 // details at https://github.com/broofa/node-uuid
 (function() {
@@ -3892,7 +5611,7 @@ exports.any_md5 = any_md5;
   module.exports = whatwgRNG || mathRNG;
 
 }())
-},{}],16:[function(require,module,exports){
+},{}],17:[function(require,module,exports){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-1, as defined
  * in FIPS PUB 180-1
@@ -4104,7 +5823,7 @@ function binb2b64(binarray)
 }
 
 
-},{}],17:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 var http = module.exports;
 var EventEmitter = require('events').EventEmitter;
 var Request = require('./lib/request');
@@ -4166,7 +5885,7 @@ var xhrHttp = (function () {
     }
 })();
 
-},{"./lib/request":18,"events":5}],18:[function(require,module,exports){
+},{"./lib/request":19,"events":6}],19:[function(require,module,exports){
 (function(){var Stream = require('stream');
 var Response = require('./response');
 var concatStream = require('concat-stream')
@@ -4300,7 +6019,7 @@ var indexOf = function (xs, x) {
 };
 
 })()
-},{"./response":19,"buffer":11,"concat-stream":20,"stream":7}],19:[function(require,module,exports){
+},{"./response":20,"buffer":12,"concat-stream":21,"stream":8}],20:[function(require,module,exports){
 var Stream = require('stream');
 
 var Response = module.exports = function (res) {
@@ -4421,7 +6140,7 @@ var isArray = Array.isArray || function (xs) {
     return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{"stream":7}],20:[function(require,module,exports){
+},{"stream":8}],21:[function(require,module,exports){
 (function(Buffer){var stream = require('stream')
 var util = require('util')
 
@@ -4472,9 +6191,9 @@ module.exports = function(cb) {
 module.exports.ConcatStream = ConcatStream
 
 })(require("__browserify_Buffer").Buffer)
-},{"__browserify_Buffer":22,"stream":7,"util":9}],21:[function(require,module,exports){
+},{"__browserify_Buffer":23,"stream":8,"util":10}],22:[function(require,module,exports){
 
-},{}],22:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 require=(function(e,t,n,r){function i(r){if(!n[r]){if(!t[r]){if(e)return e(r);throw new Error("Cannot find module '"+r+"'")}var s=n[r]={exports:{}};t[r][0](function(e){var n=t[r][1][e];return i(n?n:e)},s,s.exports)}return n[r].exports}for(var s=0;s<r.length;s++)i(r[s]);return i})(typeof require!=="undefined"&&require,{1:[function(require,module,exports){
 // UTILITY
 var util = require('util');
@@ -8336,7 +10055,7 @@ SlowBuffer.prototype.writeDoubleBE = Buffer.prototype.writeDoubleBE;
 },{}]},{},[])
 ;;module.exports=require("buffer-browserify")
 
-},{}],23:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -8390,7 +10109,7 @@ process.chdir = function (dir) {
     throw new Error('process.chdir is not supported');
 };
 
-},{}],24:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 (function(Buffer){var stream = require('stream')
 var util = require('util')
 
@@ -8443,10 +10162,10 @@ module.exports = function(cb) {
 module.exports.ConcatStream = ConcatStream
 
 })(require("__browserify_Buffer").Buffer)
-},{"__browserify_Buffer":22,"stream":7,"util":9}],25:[function(require,module,exports){
+},{"__browserify_Buffer":23,"stream":8,"util":10}],26:[function(require,module,exports){
 module.exports = require('./lib/gravatar');
 
-},{"./lib/gravatar":26}],26:[function(require,module,exports){
+},{"./lib/gravatar":27}],27:[function(require,module,exports){
 var crypto = require('crypto')
   , querystring = require('querystring');
 
@@ -8460,7 +10179,7 @@ var gravatar = module.exports = {
     }
 };
 
-},{"crypto":13,"querystring":6}],27:[function(require,module,exports){
+},{"crypto":14,"querystring":7}],28:[function(require,module,exports){
 var hat = module.exports = function (bits, base) {
     if (!base) base = 16;
     if (bits === undefined) bits = 128;
@@ -8524,7 +10243,7 @@ hat.rack = function (bits, base, expandBy) {
     return fn;
 };
 
-},{}],28:[function(require,module,exports){
+},{}],29:[function(require,module,exports){
 var levelup = require('levelup')
 var leveljs = require('level-js')
 var websocket = require('websocket-stream')
@@ -8596,7 +10315,7 @@ User.prototype.copy = function(from, to, cb) {
   })
 }
 
-},{"browser-request":29,"level-delete-range":30,"level-js":34,"level-sublevel":41,"levelup":53,"multilevel":83,"persona-id":116,"websocket-stream":119}],29:[function(require,module,exports){
+},{"browser-request":30,"level-delete-range":31,"level-js":35,"level-sublevel":42,"levelup":54,"multilevel":84,"persona-id":117,"websocket-stream":120}],30:[function(require,module,exports){
 (function(){// Browser Request
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -8983,7 +10702,7 @@ function b64_enc (data) {
 }
 
 })()
-},{}],30:[function(require,module,exports){
+},{}],31:[function(require,module,exports){
 var EndStream = require("end-stream")
 
 module.exports = deleteRange
@@ -9001,7 +10720,7 @@ function deleteRange(db, options, callback) {
 
 function noop() {}
 
-},{"end-stream":31}],31:[function(require,module,exports){
+},{"end-stream":32}],32:[function(require,module,exports){
 var WriteStream = require("write-stream")
 
 module.exports = EndStream
@@ -9037,7 +10756,7 @@ function EndStream(write, end) {
 
 function noop() {}
 
-},{"write-stream":33}],32:[function(require,module,exports){
+},{"write-stream":34}],33:[function(require,module,exports){
 var to = require("./index")
 
 module.exports = toArray
@@ -9060,7 +10779,7 @@ function toArray(array, end) {
     }
 }
 
-},{"./index":33}],33:[function(require,module,exports){
+},{"./index":34}],34:[function(require,module,exports){
 var Stream = require("stream")
 
 module.exports = WriteStream
@@ -9103,7 +10822,7 @@ function defaultEnd() {
     this.emit("finish")
 }
 
-},{"./array":32,"stream":7}],34:[function(require,module,exports){
+},{"./array":33,"stream":8}],35:[function(require,module,exports){
 module.exports = Level
 
 var IDB = require('idb-wrapper')
@@ -9214,7 +10933,7 @@ function StringToArrayBuffer(str) {
   return buf
 }
 
-},{"./iterator":35,"abstract-leveldown":38,"idb-wrapper":39,"isbuffer":40,"util":9}],35:[function(require,module,exports){
+},{"./iterator":36,"abstract-leveldown":39,"idb-wrapper":40,"isbuffer":41,"util":10}],36:[function(require,module,exports){
 var util = require('util')
 var AbstractIterator  = require('abstract-leveldown').AbstractIterator
 module.exports = Iterator
@@ -9300,7 +11019,7 @@ Iterator.prototype._next = function (callback) {
   }
   this.callback = callback
 }
-},{"abstract-leveldown":38,"util":9}],36:[function(require,module,exports){
+},{"abstract-leveldown":39,"util":10}],37:[function(require,module,exports){
 (function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
 
 function AbstractChainedBatch (db) {
@@ -9370,7 +11089,7 @@ AbstractChainedBatch.prototype.write = function (options, callback) {
 
 module.exports = AbstractChainedBatch
 })(require("__browserify_process"))
-},{"__browserify_process":23}],37:[function(require,module,exports){
+},{"__browserify_process":24}],38:[function(require,module,exports){
 (function(process){/* Copyright (c) 2013 Rod Vagg, MIT License */
 
 function AbstractIterator (db) {
@@ -9422,7 +11141,7 @@ AbstractIterator.prototype.end = function (callback) {
 module.exports = AbstractIterator
 
 })(require("__browserify_process"))
-},{"__browserify_process":23}],38:[function(require,module,exports){
+},{"__browserify_process":24}],39:[function(require,module,exports){
 (function(process,Buffer){/* Copyright (c) 2013 Rod Vagg, MIT License */
 
 var AbstractIterator     = require('./abstract-iterator')
@@ -9607,7 +11326,7 @@ module.exports.AbstractLevelDOWN = AbstractLevelDOWN
 module.exports.AbstractIterator  = AbstractIterator
 
 })(require("__browserify_process"),require("__browserify_Buffer").Buffer)
-},{"./abstract-chained-batch":36,"./abstract-iterator":37,"__browserify_Buffer":22,"__browserify_process":23}],39:[function(require,module,exports){
+},{"./abstract-chained-batch":37,"./abstract-iterator":38,"__browserify_Buffer":23,"__browserify_process":24}],40:[function(require,module,exports){
 (function(){/*jshint expr:true */
 /*global window:false, console:false, define:false, module:false */
 
@@ -10597,7 +12316,7 @@ module.exports.AbstractIterator  = AbstractIterator
 }, this);
 
 })()
-},{}],40:[function(require,module,exports){
+},{}],41:[function(require,module,exports){
 (function(){var Buffer = require('buffer').Buffer;
 
 module.exports = isBuffer;
@@ -10608,7 +12327,7 @@ function isBuffer (o) {
 }
 
 })()
-},{"buffer":11}],41:[function(require,module,exports){
+},{"buffer":12}],42:[function(require,module,exports){
 (function(process){var EventEmitter = require('events').EventEmitter
 var next         = process.nextTick
 var SubDb        = require('./sub')
@@ -10696,7 +12415,7 @@ module.exports   = function (db, options) {
 
 
 })(require("__browserify_process"))
-},{"./sub":51,"__browserify_process":23,"events":5,"level-fix-range":42,"level-hooks":43}],42:[function(require,module,exports){
+},{"./sub":52,"__browserify_process":24,"events":6,"level-fix-range":43,"level-hooks":44}],43:[function(require,module,exports){
 
 module.exports = 
 function fixRange(opts) {
@@ -10720,7 +12439,7 @@ function fixRange(opts) {
 }
 
 
-},{}],43:[function(require,module,exports){
+},{}],44:[function(require,module,exports){
 var ranges = require('string-range')
 
 module.exports = function (db) {
@@ -10884,7 +12603,7 @@ module.exports = function (db) {
   }
 }
 
-},{"string-range":44}],44:[function(require,module,exports){
+},{"string-range":45}],45:[function(require,module,exports){
 
 //force to a valid range
 var range = exports.range = function (obj) {
@@ -10958,7 +12677,7 @@ var satifies = exports.satisfies = function (key, range) {
 
 
 
-},{}],45:[function(require,module,exports){
+},{}],46:[function(require,module,exports){
 module.exports = hasKeys
 
 function hasKeys(source) {
@@ -10967,7 +12686,7 @@ function hasKeys(source) {
         typeof source === "function")
 }
 
-},{}],46:[function(require,module,exports){
+},{}],47:[function(require,module,exports){
 var Keys = require("object-keys")
 var hasKeys = require("./has-keys")
 
@@ -10994,11 +12713,11 @@ function extend() {
     return target
 }
 
-},{"./has-keys":45,"object-keys":47}],47:[function(require,module,exports){
+},{"./has-keys":46,"object-keys":48}],48:[function(require,module,exports){
 module.exports = Object.keys || require('./shim');
 
 
-},{"./shim":50}],48:[function(require,module,exports){
+},{"./shim":51}],49:[function(require,module,exports){
 
 var hasOwn = Object.prototype.hasOwnProperty;
 
@@ -11021,7 +12740,7 @@ module.exports = function forEach (obj, fn, ctx) {
 };
 
 
-},{}],49:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
 
 /**!
  * is
@@ -11725,7 +13444,7 @@ is.string = function (value) {
 };
 
 
-},{}],50:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 (function () {
 	"use strict";
 
@@ -11771,7 +13490,7 @@ is.string = function (value) {
 }());
 
 
-},{"foreach":48,"is":49}],51:[function(require,module,exports){
+},{"foreach":49,"is":50}],52:[function(require,module,exports){
 var EventEmitter = require('events').EventEmitter
 var inherits     = require('util').inherits
 var ranges       = require('string-range')
@@ -12028,7 +13747,7 @@ SDB.post = function (range, hook) {
 var exports = module.exports = SubDB
 
 
-},{"events":5,"level-fix-range":42,"string-range":44,"util":9,"xtend":46}],52:[function(require,module,exports){
+},{"events":6,"level-fix-range":43,"string-range":45,"util":10,"xtend":47}],53:[function(require,module,exports){
 /* Copyright (c) 2012-2013 LevelUP contributors
  * See list at <https://github.com/rvagg/node-levelup#contributing>
  * MIT +no-false-attribs License
@@ -12048,7 +13767,7 @@ module.exports = {
   , EncodingError       : createError('EncodingError', LevelUPError)
 }
 
-},{"errno":73}],53:[function(require,module,exports){
+},{"errno":74}],54:[function(require,module,exports){
 (function(process){/* Copyright (c) 2012-2013 LevelUP contributors
  * See list at <https://github.com/rvagg/node-levelup#contributing>
  * MIT +no-false-attribs License
@@ -12511,7 +14230,7 @@ module.exports.destroy = utilStatic('destroy')
 module.exports.repair  = utilStatic('repair')
 
 })(require("__browserify_process"))
-},{"./errors":52,"./read-stream":55,"./util":56,"./write-stream":57,"__browserify_process":23,"events":5,"prr":74,"util":9,"xtend":77}],54:[function(require,module,exports){
+},{"./errors":53,"./read-stream":56,"./util":57,"./write-stream":58,"__browserify_process":24,"events":6,"prr":75,"util":10,"xtend":78}],55:[function(require,module,exports){
 function State () {
   this.ended = this._ready = this._reading = this._destroyed = this._paused = false
 }
@@ -12570,7 +14289,7 @@ State.prototype.canEnd = function() {
 }
 
 module.exports = function () { return new State() }
-},{}],55:[function(require,module,exports){
+},{}],56:[function(require,module,exports){
 (function(Buffer){/* Copyright (c) 2012-2013 LevelUP contributors
  * See list at <https://github.com/rvagg/node-levelup#contributing>
  * MIT +no-false-attribs License <https://github.com/rvagg/node-levelup/blob/master/LICENSE>
@@ -12744,7 +14463,7 @@ module.exports.create = function (options, db, iteratorFactory) {
 }
 
 })(require("__browserify_Buffer").Buffer)
-},{"./errors":52,"./read-stream-state":54,"./util":56,"__browserify_Buffer":22,"simple-bufferstream":75,"stream":7,"util":9,"xtend":77}],56:[function(require,module,exports){
+},{"./errors":53,"./read-stream-state":55,"./util":57,"__browserify_Buffer":23,"simple-bufferstream":76,"stream":8,"util":10,"xtend":78}],57:[function(require,module,exports){
 (function(process,global){/* Copyright (c) 2012-2013 LevelUP contributors
  * See list at <https://github.com/rvagg/node-levelup#contributing>
  * MIT +no-false-attribs License
@@ -12878,7 +14597,7 @@ module.exports = {
 }
 
 })(require("__browserify_process"),self)
-},{"../package.json":82,"./errors":52,"__browserify_process":23,"bops":58,"leveldown":21,"leveldown/package":21,"semver":21,"xtend":77}],57:[function(require,module,exports){
+},{"../package.json":83,"./errors":53,"__browserify_process":24,"bops":59,"leveldown":22,"leveldown/package":22,"semver":22,"xtend":78}],58:[function(require,module,exports){
 /* Copyright (c) 2012-2013 LevelUP contributors
  * See list at <https://github.com/rvagg/node-levelup#contributing>
  * MIT +no-false-attribs License
@@ -13057,7 +14776,7 @@ module.exports.create = function (options, db) {
   return new WriteStream(options, db)
 }
 
-},{"./util":56,"concat-stream":71,"stream":7,"util":9,"xtend":77}],58:[function(require,module,exports){
+},{"./util":57,"concat-stream":72,"stream":8,"util":10,"xtend":78}],59:[function(require,module,exports){
 var proto = {}
 module.exports = proto
 
@@ -13078,7 +14797,7 @@ function mix(from, into) {
   }
 }
 
-},{"./copy.js":61,"./create.js":62,"./from.js":63,"./is.js":64,"./join.js":65,"./read.js":67,"./subarray.js":68,"./to.js":69,"./write.js":70}],59:[function(require,module,exports){
+},{"./copy.js":62,"./create.js":63,"./from.js":64,"./is.js":65,"./join.js":66,"./read.js":68,"./subarray.js":69,"./to.js":70,"./write.js":71}],60:[function(require,module,exports){
 (function (exports) {
 	'use strict';
 
@@ -13164,7 +14883,7 @@ function mix(from, into) {
 	module.exports.fromByteArray = uint8ToBase64;
 }());
 
-},{}],60:[function(require,module,exports){
+},{}],61:[function(require,module,exports){
 module.exports = to_utf8
 
 var out = []
@@ -13239,7 +14958,7 @@ function reduced(list) {
   return out
 }
 
-},{}],61:[function(require,module,exports){
+},{}],62:[function(require,module,exports){
 module.exports = copy
 
 var slice = [].slice
@@ -13293,12 +15012,12 @@ function slow_copy(from, to, j, i, jend) {
   }
 }
 
-},{}],62:[function(require,module,exports){
+},{}],63:[function(require,module,exports){
 module.exports = function(size) {
   return new Uint8Array(size)
 }
 
-},{}],63:[function(require,module,exports){
+},{}],64:[function(require,module,exports){
 module.exports = from
 
 var base64 = require('base64-js')
@@ -13358,13 +15077,13 @@ function from_base64(str) {
   return new Uint8Array(base64.toByteArray(str)) 
 }
 
-},{"base64-js":59}],64:[function(require,module,exports){
+},{"base64-js":60}],65:[function(require,module,exports){
 
 module.exports = function(buffer) {
   return buffer instanceof Uint8Array;
 }
 
-},{}],65:[function(require,module,exports){
+},{}],66:[function(require,module,exports){
 module.exports = join
 
 function join(targets, hint) {
@@ -13402,7 +15121,7 @@ function get_length(targets) {
   return size
 }
 
-},{}],66:[function(require,module,exports){
+},{}],67:[function(require,module,exports){
 var proto
   , map
 
@@ -13424,7 +15143,7 @@ function get(target) {
   return out
 }
 
-},{}],67:[function(require,module,exports){
+},{}],68:[function(require,module,exports){
 module.exports = {
     readUInt8:      read_uint8
   , readInt8:       read_int8
@@ -13513,14 +15232,14 @@ function read_double_be(target, at) {
   return dv.getFloat64(at + target.byteOffset, false)
 }
 
-},{"./mapped.js":66}],68:[function(require,module,exports){
+},{"./mapped.js":67}],69:[function(require,module,exports){
 module.exports = subarray
 
 function subarray(buf, from, to) {
   return buf.subarray(from || 0, to || buf.length)
 }
 
-},{}],69:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 module.exports = to
 
 var base64 = require('base64-js')
@@ -13558,7 +15277,7 @@ function to_base64(buf) {
 }
 
 
-},{"base64-js":59,"to-utf8":60}],70:[function(require,module,exports){
+},{"base64-js":60,"to-utf8":61}],71:[function(require,module,exports){
 module.exports = {
     writeUInt8:      write_uint8
   , writeInt8:       write_int8
@@ -13646,7 +15365,7 @@ function write_double_be(target, value, at) {
   return dv.setFloat64(at + target.byteOffset, value, false)
 }
 
-},{"./mapped.js":66}],71:[function(require,module,exports){
+},{"./mapped.js":67}],72:[function(require,module,exports){
 (function(Buffer){var stream = require('stream')
 var util = require('util')
 
@@ -13699,7 +15418,7 @@ module.exports = function(cb) {
 module.exports.ConcatStream = ConcatStream
 
 })(require("__browserify_Buffer").Buffer)
-},{"__browserify_Buffer":22,"stream":7,"util":9}],72:[function(require,module,exports){
+},{"__browserify_Buffer":23,"stream":8,"util":10}],73:[function(require,module,exports){
 function init (name, message, cause) {
   this.name      = name
   // can be passed just a 'cause'
@@ -13750,7 +15469,7 @@ module.exports = function (errno) {
   }
 }
 
-},{}],73:[function(require,module,exports){
+},{}],74:[function(require,module,exports){
 (function(){var all = module.exports.all = [
  {
   "errno": -1,
@@ -14179,7 +15898,7 @@ module.exports.code = {
 module.exports.custom = require("./custom")(module.exports)
 
 })()
-},{"./custom":72}],74:[function(require,module,exports){
+},{"./custom":73}],75:[function(require,module,exports){
 /*!
   * prr
   * (c) 2013 Rod Vagg <rod@vagg.org>
@@ -14243,7 +15962,7 @@ module.exports.custom = require("./custom")(module.exports)
 
   return prr
 })
-},{}],75:[function(require,module,exports){
+},{}],76:[function(require,module,exports){
 (function(process){const stream = require('stream')
     , util   = require('util')
 
@@ -14287,7 +16006,7 @@ module.exports = function (buffer) {
 }
 
 })(require("__browserify_process"))
-},{"__browserify_process":23,"stream":7,"util":9}],76:[function(require,module,exports){
+},{"__browserify_process":24,"stream":8,"util":10}],77:[function(require,module,exports){
 module.exports = hasKeys
 
 function hasKeys(source) {
@@ -14296,7 +16015,7 @@ function hasKeys(source) {
         typeof source === "function")
 }
 
-},{}],77:[function(require,module,exports){
+},{}],78:[function(require,module,exports){
 var Keys = require("object-keys")
 var hasKeys = require("./has-keys")
 
@@ -14323,11 +16042,11 @@ function extend() {
     return target
 }
 
-},{"./has-keys":76,"object-keys":78}],78:[function(require,module,exports){
+},{"./has-keys":77,"object-keys":79}],79:[function(require,module,exports){
 module.exports = Object.keys || require('./shim');
 
 
-},{"./shim":81}],79:[function(require,module,exports){
+},{"./shim":82}],80:[function(require,module,exports){
 
 var hasOwn = Object.prototype.hasOwnProperty;
 
@@ -14350,7 +16069,7 @@ module.exports = function forEach (obj, fn, ctx) {
 };
 
 
-},{}],80:[function(require,module,exports){
+},{}],81:[function(require,module,exports){
 
 /**!
  * is
@@ -15054,7 +16773,7 @@ is.string = function (value) {
 };
 
 
-},{}],81:[function(require,module,exports){
+},{}],82:[function(require,module,exports){
 (function () {
 	"use strict";
 
@@ -15100,7 +16819,7 @@ is.string = function (value) {
 }());
 
 
-},{"foreach":79,"is":80}],82:[function(require,module,exports){
+},{"foreach":80,"is":81}],83:[function(require,module,exports){
 (function(){module.exports={
   "name": "levelup",
   "description": "Fast & simple storage - a Node.js-style LevelDB wrapper",
@@ -15228,7 +16947,7 @@ is.string = function (value) {
 }
 
 })()
-},{}],83:[function(require,module,exports){
+},{}],84:[function(require,module,exports){
 var MuxDemux = require('mux-demux/jsonb');
 
 module.exports = {
@@ -15236,7 +16955,7 @@ module.exports = {
   server : require('./lib/server')(MuxDemux)
 };
 
-},{"./lib/client":84,"./lib/server":85,"mux-demux/jsonb":90}],84:[function(require,module,exports){
+},{"./lib/client":85,"./lib/server":86,"mux-demux/jsonb":91}],85:[function(require,module,exports){
 /**
  * Module dependencies.
  */
@@ -15429,7 +17148,7 @@ return Db;
 };
 
 
-},{"duplexer":86,"events":5,"level-manifest":87,"rpc-stream":109,"stream-combiner":112,"tmp-stream":113,"util":9}],85:[function(require,module,exports){
+},{"duplexer":87,"events":6,"level-manifest":88,"rpc-stream":110,"stream-combiner":113,"tmp-stream":114,"util":10}],86:[function(require,module,exports){
 /**
  * Module dependencies.
  */
@@ -15522,7 +17241,7 @@ return function (db, opts) {
 
 };
 
-},{"level-manifest":87,"rpc-stream":109}],86:[function(require,module,exports){
+},{"level-manifest":88,"rpc-stream":110}],87:[function(require,module,exports){
 var Stream = require("stream")
     , writeMethods = ["write", "end", "destroy"]
     , readMethods = ["resume", "pause"]
@@ -15601,7 +17320,7 @@ function duplex(writer, reader) {
     }
 }
 
-},{"stream":7}],87:[function(require,module,exports){
+},{"stream":8}],88:[function(require,module,exports){
 
 var deepExtend = require('deep-extend')
 
@@ -15657,7 +17376,7 @@ module.exports = function manifest (db, terse) {
 }
 
 
-},{"deep-extend":88}],88:[function(require,module,exports){
+},{"deep-extend":89}],89:[function(require,module,exports){
 /*!
  * Node.JS module "Deep Extend"
  * @version 0.2.5
@@ -15720,7 +17439,7 @@ var deepExtend = module.exports = function (/*obj_1, [obj_2], [obj_N]*/) {
     return target;
 }
 
-},{}],89:[function(require,module,exports){
+},{}],90:[function(require,module,exports){
 'use strict';
 
 var through = require('through')
@@ -15907,7 +17626,7 @@ function MuxDemux (opts, onConnection) {
 } //inject
 
 
-},{"duplex":91,"through":107,"xtend":108}],90:[function(require,module,exports){
+},{"duplex":92,"through":108,"xtend":109}],91:[function(require,module,exports){
 var JSONB = require('json-buffer')
 var serializer = require('stream-serializer')
 
@@ -15921,7 +17640,7 @@ module.exports = inject(wrap)
 
 module.exports.wrap = wrap
 
-},{"./inject":89,"json-buffer":92,"stream-serializer":106}],91:[function(require,module,exports){
+},{"./inject":90,"json-buffer":93,"stream-serializer":107}],92:[function(require,module,exports){
 (function(process){var Stream = require('stream')
 
 module.exports = function (write, end) {
@@ -16068,7 +17787,7 @@ module.exports = function (write, end) {
 
 
 })(require("__browserify_process"))
-},{"__browserify_process":23,"stream":7}],92:[function(require,module,exports){
+},{"__browserify_process":24,"stream":8}],93:[function(require,module,exports){
 var bops = require('bops')
 
 //TODO: handle reviver/dehydrate function like normal
@@ -16119,7 +17838,7 @@ exports.parse = function (s) {
   })
 }
 
-},{"bops":93}],93:[function(require,module,exports){
+},{"bops":94}],94:[function(require,module,exports){
 var proto = {}
 module.exports = proto
 
@@ -16140,7 +17859,7 @@ function mix(from, into) {
   }
 }
 
-},{"./copy.js":96,"./create.js":97,"./from.js":98,"./is.js":99,"./join.js":100,"./read.js":102,"./subarray.js":103,"./to.js":104,"./write.js":105}],94:[function(require,module,exports){
+},{"./copy.js":97,"./create.js":98,"./from.js":99,"./is.js":100,"./join.js":101,"./read.js":103,"./subarray.js":104,"./to.js":105,"./write.js":106}],95:[function(require,module,exports){
 (function (exports) {
 	'use strict';
 
@@ -16226,7 +17945,7 @@ function mix(from, into) {
 	module.exports.fromByteArray = uint8ToBase64;
 }());
 
-},{}],95:[function(require,module,exports){
+},{}],96:[function(require,module,exports){
 module.exports = to_utf8
 
 var out = []
@@ -16301,7 +18020,7 @@ function reduced(list) {
   return out
 }
 
-},{}],96:[function(require,module,exports){
+},{}],97:[function(require,module,exports){
 module.exports = copy
 
 var slice = [].slice
@@ -16355,12 +18074,12 @@ function slow_copy(from, to, j, i, jend) {
   }
 }
 
-},{}],97:[function(require,module,exports){
+},{}],98:[function(require,module,exports){
 module.exports = function(size) {
   return new Uint8Array(size)
 }
 
-},{}],98:[function(require,module,exports){
+},{}],99:[function(require,module,exports){
 module.exports = from
 
 var base64 = require('base64-js')
@@ -16420,13 +18139,13 @@ function from_base64(str) {
   return new Uint8Array(base64.toByteArray(str)) 
 }
 
-},{"base64-js":94}],99:[function(require,module,exports){
+},{"base64-js":95}],100:[function(require,module,exports){
 
 module.exports = function(buffer) {
   return buffer instanceof Uint8Array;
 }
 
-},{}],100:[function(require,module,exports){
+},{}],101:[function(require,module,exports){
 module.exports = join
 
 function join(targets, hint) {
@@ -16464,7 +18183,7 @@ function get_length(targets) {
   return size
 }
 
-},{}],101:[function(require,module,exports){
+},{}],102:[function(require,module,exports){
 var proto
   , map
 
@@ -16486,7 +18205,7 @@ function get(target) {
   return out
 }
 
-},{}],102:[function(require,module,exports){
+},{}],103:[function(require,module,exports){
 module.exports = {
     readUInt8:      read_uint8
   , readInt8:       read_int8
@@ -16575,14 +18294,14 @@ function read_double_be(target, at) {
   return dv.getFloat64(at + target.byteOffset, false)
 }
 
-},{"./mapped.js":101}],103:[function(require,module,exports){
+},{"./mapped.js":102}],104:[function(require,module,exports){
 module.exports = subarray
 
 function subarray(buf, from, to) {
   return buf.subarray(from || 0, to || buf.length)
 }
 
-},{}],104:[function(require,module,exports){
+},{}],105:[function(require,module,exports){
 module.exports = to
 
 var base64 = require('base64-js')
@@ -16620,7 +18339,7 @@ function to_base64(buf) {
 }
 
 
-},{"base64-js":94,"to-utf8":95}],105:[function(require,module,exports){
+},{"base64-js":95,"to-utf8":96}],106:[function(require,module,exports){
 module.exports = {
     writeUInt8:      write_uint8
   , writeInt8:       write_int8
@@ -16708,7 +18427,7 @@ function write_double_be(target, value, at) {
   return dv.setFloat64(at + target.byteOffset, value, false)
 }
 
-},{"./mapped.js":101}],106:[function(require,module,exports){
+},{"./mapped.js":102}],107:[function(require,module,exports){
 
 var EventEmitter = require('events').EventEmitter
 
@@ -16778,7 +18497,7 @@ exports.raw = function (stream) {
 }
 
 
-},{"events":5}],107:[function(require,module,exports){
+},{"events":6}],108:[function(require,module,exports){
 (function(process){var Stream = require('stream')
 
 // through
@@ -16889,7 +18608,7 @@ function through (write, end, opts) {
 
 
 })(require("__browserify_process"))
-},{"__browserify_process":23,"stream":7}],108:[function(require,module,exports){
+},{"__browserify_process":24,"stream":8}],109:[function(require,module,exports){
 module.exports = extend
 
 function extend(target) {
@@ -16905,7 +18624,7 @@ function extend(target) {
 
     return target
 }
-},{}],109:[function(require,module,exports){
+},{}],110:[function(require,module,exports){
 (function(){var through = require('through')
 var serialize = require('stream-serializer')()
 
@@ -17018,7 +18737,7 @@ module.exports = function (obj, raw) {
 }
 
 })()
-},{"stream-serializer":110,"through":111}],110:[function(require,module,exports){
+},{"stream-serializer":111,"through":112}],111:[function(require,module,exports){
 
 var EventEmitter = require('events').EventEmitter
 
@@ -17088,7 +18807,7 @@ exports.raw = function (stream) {
 }
 
 
-},{"events":5}],111:[function(require,module,exports){
+},{"events":6}],112:[function(require,module,exports){
 (function(process){var Stream = require('stream')
 
 // through
@@ -17199,7 +18918,7 @@ function through (write, end, opts) {
 
 
 })(require("__browserify_process"))
-},{"__browserify_process":23,"stream":7}],112:[function(require,module,exports){
+},{"__browserify_process":24,"stream":8}],113:[function(require,module,exports){
 var duplexer = require('duplexer')
 
 module.exports = function () {
@@ -17240,7 +18959,7 @@ module.exports = function () {
 }
 
 
-},{"duplexer":86}],113:[function(require,module,exports){
+},{"duplexer":87}],114:[function(require,module,exports){
 (function(process){var duplex = require('duplexer');
 var through = require('through');
 
@@ -17295,7 +19014,7 @@ function tmp () {
 }
 
 })(require("__browserify_process"))
-},{"__browserify_process":23,"duplexer":114,"through":115}],114:[function(require,module,exports){
+},{"__browserify_process":24,"duplexer":115,"through":116}],115:[function(require,module,exports){
 var Stream = require("stream")
 var writeMethods = ["write", "end", "destroy"]
 var readMethods = ["resume", "pause"]
@@ -17384,7 +19103,7 @@ function duplex(writer, reader) {
     }
 }
 
-},{"stream":7}],115:[function(require,module,exports){
+},{"stream":8}],116:[function(require,module,exports){
 (function(process){var Stream = require('stream')
 
 // through
@@ -17495,7 +19214,7 @@ function through (write, end, opts) {
 
 
 })(require("__browserify_process"))
-},{"__browserify_process":23,"stream":7}],116:[function(require,module,exports){
+},{"__browserify_process":24,"stream":8}],117:[function(require,module,exports){
 var http = require('http');
 var inherits = require('inherits');
 var EventEmitter = require('events').EventEmitter;
@@ -17622,7 +19341,7 @@ Persona.prototype._logout = function () {
     req.end();
 };
 
-},{"./vendor/persona.js":118,"events":5,"http":17,"inherits":117,"querystring":6,"url":8}],117:[function(require,module,exports){
+},{"./vendor/persona.js":119,"events":6,"http":18,"inherits":118,"querystring":7,"url":9}],118:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -17647,7 +19366,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],118:[function(require,module,exports){
+},{}],119:[function(require,module,exports){
 var navigator = { userAgent: window.navigator.userAgent };
 if (window.navigator.id) navigator.id = window.navigator.id;
 
@@ -17661,7 +19380,7 @@ if (window.navigator.id) navigator.id = window.navigator.id;
 (function(){var a=function(){function e(a){return Array.isArray?Array.isArray(a):a.constructor.toString().indexOf("Array")!=-1}function d(a,c,d){var e=b[c][d];for(var f=0;f<e.length;f++)e[f].win===a&&e.splice(f,1);b[c][d].length===0&&delete b[c][d]}function c(a,c,d,e){function f(b){for(var c=0;c<b.length;c++)if(b[c].win===a)return!0;return!1}var g=!1;if(c==="*")for(var h in b){if(!b.hasOwnProperty(h))continue;if(h==="*")continue;if(typeof b[h][d]=="object"){g=f(b[h][d]);if(g)break}}else b["*"]&&b["*"][d]&&(g=f(b["*"][d])),!g&&b[c]&&b[c][d]&&(g=f(b[c][d]));if(g)throw"A channel is already bound to the same window which overlaps with origin '"+c+"' and has scope '"+d+"'";typeof b[c]!="object"&&(b[c]={}),typeof b[c][d]!="object"&&(b[c][d]=[]),b[c][d].push({win:a,handler:e})}"use strict";var a=Math.floor(Math.random()*1000001),b={},f={},g=function(a){try{var c=JSON.parse(a.data);if(typeof c!="object"||c===null)throw"malformed"}catch(a){return}var d=a.source,e=a.origin,g,h,i;if(typeof c.method=="string"){var j=c.method.split("::");j.length==2?(g=j[0],i=j[1]):i=c.method}typeof c.id!="undefined"&&(h=c.id);if(typeof i=="string"){var k=!1;if(b[e]&&b[e][g])for(var l=0;l<b[e][g].length;l++)if(b[e][g][l].win===d){b[e][g][l].handler(e,i,c),k=!0;break}if(!k&&b["*"]&&b["*"][g])for(var l=0;l<b["*"][g].length;l++)if(b["*"][g][l].win===d){b["*"][g][l].handler(e,i,c);break}}else typeof h!="undefined"&&f[h]&&f[h](e,i,c)};window.addEventListener?window.addEventListener("message",g,!1):window.attachEvent&&window.attachEvent("onmessage",g);return{build:function(b){var g=function(a){if(b.debugOutput&&window.console&&window.console.log){try{typeof a!="string"&&(a=JSON.stringify(a))}catch(c){}console.log("["+j+"] "+a)}};if(!window.postMessage)throw"jschannel cannot run this browser, no postMessage";if(!window.JSON||!window.JSON.stringify||!window.JSON.parse)throw"jschannel cannot run this browser, no JSON parsing/serialization";if(typeof b!="object")throw"Channel build invoked without a proper object argument";if(!b.window||!b.window.postMessage)throw"Channel.build() called without a valid window argument";if(window===b.window)throw"target window is same as present window -- not allowed";var h=!1;if(typeof b.origin=="string"){var i;b.origin==="*"?h=!0:null!==(i=b.origin.match(/^https?:\/\/(?:[-a-zA-Z0-9_\.])+(?::\d+)?/))&&(b.origin=i[0].toLowerCase(),h=!0)}if(!h)throw"Channel.build() called with an invalid origin";if(typeof b.scope!="undefined"){if(typeof b.scope!="string")throw"scope, when specified, must be a string";if(b.scope.split("::").length>1)throw"scope may not contain double colons: '::'"}var j=function(){var a="",b="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";for(var c=0;c<5;c++)a+=b.charAt(Math.floor(Math.random()*b.length));return a}(),k={},l={},m={},n=!1,o=[],p=function(a,b,c){var d=!1,e=!1;return{origin:b,invoke:function(b,d){if(!m[a])throw"attempting to invoke a callback of a nonexistent transaction: "+a;var e=!1;for(var f=0;f<c.length;f++)if(b===c[f]){e=!0;break}if(!e)throw"request supports no such callback '"+b+"'";t({id:a,callback:b,params:d})},error:function(b,c){e=!0;if(!m[a])throw"error called for nonexistent message: "+a;delete m[a],t({id:a,error:b,message:c})},complete:function(b){e=!0;if(!m[a])throw"complete called for nonexistent message: "+a;delete m[a],t({id:a,result:b})},delayReturn:function(a){typeof a=="boolean"&&(d=a===!0);return d},completed:function(){return e}}},q=function(a,b,c){return window.setTimeout(function(){if(l[a]){var d="timeout ("+b+"ms) exceeded on method '"+c+"'";(1,l[a].error)("timeout_error",d),delete l[a],delete f[a]}},b)},r=function(a,c,d){if(typeof b.gotMessageObserver=="function")try{b.gotMessageObserver(a,d)}catch(h){g("gotMessageObserver() raised an exception: "+h.toString())}if(d.id&&c){if(k[c]){var i=p(d.id,a,d.callbacks?d.callbacks:[]);m[d.id]={};try{if(d.callbacks&&e(d.callbacks)&&d.callbacks.length>0)for(var j=0;j<d.callbacks.length;j++){var n=d.callbacks[j],o=d.params,q=n.split("/");for(var r=0;r<q.length-1;r++){var s=q[r];typeof o[s]!="object"&&(o[s]={}),o=o[s]}o[q[q.length-1]]=function(){var a=n;return function(b){return i.invoke(a,b)}}()}var t=k[c](i,d.params);!i.delayReturn()&&!i.completed()&&i.complete(t)}catch(h){var u="runtime_error",v=null;typeof h=="string"?v=h:typeof h=="object"&&(h&&e(h)&&h.length==2?(u=h[0],v=h[1]):typeof h.error=="string"&&(u=h.error,h.message?typeof h.message=="string"?v=h.message:h=h.message:v=""));if(v===null)try{v=JSON.stringify(h),typeof v=="undefined"&&(v=h.toString())}catch(w){v=h.toString()}i.error(u,v)}}}else d.id&&d.callback?!l[d.id]||!l[d.id].callbacks||!l[d.id].callbacks[d.callback]?g("ignoring invalid callback, id:"+d.id+" ("+d.callback+")"):l[d.id].callbacks[d.callback](d.params):d.id?l[d.id]?(d.error?(1,l[d.id].error)(d.error,d.message):d.result!==undefined?(1,l[d.id].success)(d.result):(1,l[d.id].success)(),delete l[d.id],delete f[d.id]):g("ignoring invalid response: "+d.id):c&&k[c]&&k[c]({origin:a},d.params)};c(b.window,b.origin,typeof b.scope=="string"?b.scope:"",r);var s=function(a){typeof b.scope=="string"&&b.scope.length&&(a=[b.scope,a].join("::"));return a},t=function(a,c){if(!a)throw"postMessage called with null message";var d=n?"post  ":"queue ";g(d+" message: "+JSON.stringify(a));if(!c&&!n)o.push(a);else{if(typeof b.postMessageObserver=="function")try{b.postMessageObserver(b.origin,a)}catch(e){g("postMessageObserver() raised an exception: "+e.toString())}b.window.postMessage(JSON.stringify(a),b.origin)}},u=function(a,c){g("ready msg received");if(n)throw"received ready message while in ready state.  help!";c==="ping"?j+="-R":j+="-L",v.unbind("__ready"),n=!0,g("ready msg accepted."),c==="ping"&&v.notify({method:"__ready",params:"pong"});while(o.length)t(o.pop());typeof b.onReady=="function"&&b.onReady(v)},v={unbind:function(a){if(k[a]){if(delete k[a])return!0;throw"can't delete method: "+a}return!1},bind:function(a,b){if(!a||typeof a!="string")throw"'method' argument to bind must be string";if(!b||typeof b!="function")throw"callback missing from bind params";if(k[a])throw"method '"+a+"' is already bound!";k[a]=b;return this},call:function(b){if(!b)throw"missing arguments to call function";if(!b.method||typeof b.method!="string")throw"'method' argument to call must be string";if(!b.success||typeof b.success!="function")throw"'success' callback missing from call";var c={},d=[],e=function(a,b){if(typeof b=="object")for(var f in b){if(!b.hasOwnProperty(f))continue;var g=a+(a.length?"/":"")+f;typeof b[f]=="function"?(c[g]=b[f],d.push(g),delete b[f]):typeof b[f]=="object"&&e(g,b[f])}};e("",b.params);var g={id:a,method:s(b.method),params:b.params};d.length&&(g.callbacks=d),b.timeout&&q(a,b.timeout,s(b.method)),l[a]={callbacks:c,error:b.error,success:b.success},f[a]=r,a++,t(g)},notify:function(a){if(!a)throw"missing arguments to notify function";if(!a.method||typeof a.method!="string")throw"'method' argument to notify must be string";t({method:s(a.method),params:a.params})},destroy:function(){d(b.window,b.origin,typeof b.scope=="string"?b.scope:""),window.removeEventListener?window.removeEventListener("message",r,!1):window.detachEvent&&window.detachEvent("onmessage",r),n=!1,k={},m={},l={},b.origin=null,o=[],g("channel destroyed"),j=""}};v.bind("__ready",u),setTimeout(function(){},0);return v}}}();WinChan=function(){function i(){var b=window.location,c=window.opener.frames,d=b.protocol+"//"+b.host;for(var e=c.length-1;e>=0;e--)try{if(c[e].location.href.indexOf(d)===0&&c[e].name===a)return c[e]}catch(f){}return}function h(a){/^https?:\/\//.test(a)||(a=window.location.href);var b=/^(https?:\/\/[\-_a-zA-Z\.0-9:]+)/.exec(a);return b?b[1]:a}function g(){return window.JSON&&window.JSON.stringify&&window.JSON.parse&&window.postMessage}function f(){try{var a=navigator.userAgent;return a.indexOf("Fennec/")!=-1||a.indexOf("Firefox/")!=-1&&a.indexOf("Android")!=-1}catch(b){}return!1}function e(){var a=-1;if(navigator.appName==="Microsoft Internet Explorer"){var b=navigator.userAgent,c=new RegExp("MSIE ([0-9]{1,}[.0-9]{0,})");c.exec(b)!=null&&(a=parseFloat(RegExp.$1))}return a>=8}function d(a,b,c){a.detachEvent?a.detachEvent("on"+b,c):a.removeEventListener&&a.removeEventListener(b,c,!1)}function c(a,b,c){a.attachEvent?a.attachEvent("on"+b,c):a.addEventListener&&a.addEventListener(b,c,!1)}var a="__winchan_relay_frame",b="die",j=e();return g()?{open:function(e,g){function q(a){try{var b=JSON.parse(a.data);b.a==="ready"?m.postMessage(o,l):b.a==="error"?g&&(g(b.d),g=null):b.a==="response"&&(d(window,"message",q),d(window,"unload",p),p(),g&&(g(null,b.d),g=null))}catch(c){}}function p(){k&&document.body.removeChild(k),k=undefined;if(n)try{n.close()}catch(a){m.postMessage(b,l)}n=m=undefined}if(!g)throw"missing required callback argument";var i;e.url||(i="missing required 'url' parameter"),e.relay_url||(i="missing required 'relay_url' parameter"),i&&setTimeout(function(){g(i)},0),e.window_name||(e.window_name=null);if(!e.window_features||f())e.window_features=undefined;var k,l=h(e.url);if(l!==h(e.relay_url))return setTimeout(function(){g("invalid arguments: origin of url and relay_url must match")},0);var m;j&&(k=document.createElement("iframe"),k.setAttribute("src",e.relay_url),k.style.display="none",k.setAttribute("name",a),document.body.appendChild(k),m=k.contentWindow);var n=window.open(e.url,e.window_name,e.window_features);m||(m=n);var o=JSON.stringify({a:"request",d:e.params});c(window,"unload",p),c(window,"message",q);return{close:p,focus:function(){if(n)try{n.focus()}catch(a){}}}}}:{open:function(a,b,c,d){setTimeout(function(){d("unsupported browser")},0)}}}();var b=function(){function l(){return c}function k(){c=g()||h()||i()||j();return!c}function j(){if(!(window.JSON&&window.JSON.stringify&&window.JSON.parse))return"JSON_NOT_SUPPORTED"}function i(){if(!a.postMessage)return"POSTMESSAGE_NOT_SUPPORTED"}function h(){try{var b="localStorage"in a&&a.localStorage!==null;if(b)a.localStorage.setItem("test","true"),a.localStorage.removeItem("test");else return"LOCALSTORAGE_NOT_SUPPORTED"}catch(c){return"LOCALSTORAGE_DISABLED"}}function g(){return f()}function f(){var a=e(),b=a>-1&&a<8;if(b)return"BAD_IE_VERSION"}function e(){var a=-1;if(b.appName=="Microsoft Internet Explorer"){var c=b.userAgent,d=new RegExp("MSIE ([0-9]{1,}[.0-9]{0,})");d.exec(c)!=null&&(a=parseFloat(RegExp.$1))}return a}function d(c,d){b=c,a=d}var a=window,b=navigator,c;return{setTestEnv:d,isSupported:k,getNoSupportReason:l}}();navigator.id||(navigator.id={},navigator.mozId?navigator.id=navigator.mozId:navigator.id={});if(!navigator.id.request||navigator.id._shimmed){var c="https://login.persona.org",d=navigator.userAgent,e=d.indexOf("Fennec/")!=-1||d.indexOf("Firefox/")!=-1&&d.indexOf("Android")!=-1,f=e?undefined:"menubar=0,location=1,resizable=1,scrollbars=1,status=0,width=700,height=375",g,h={login:null,logout:null,match:null,ready:null},i,j=undefined;function k(a){a!==!0;if(j===undefined)j=a;else if(j!=a)throw new Error("you cannot combine the navigator.id.watch() API with navigator.id.getVerifiedEmail() or navigator.id.get()this site should instead use navigator.id.request() and navigator.id.watch()")}var l,m=!1,n=b.isSupported();function o(a){document.addEventListener?document.addEventListener("DOMContentLoaded",function b(){document.removeEventListener("DOMContentLoaded",b),a()},!1):document.attachEvent&&document.readyState&&document.attachEvent("onreadystatechange",function c(){var b=document.readyState;if(b==="loaded"||b==="complete"||b==="interactive")document.detachEvent("onreadystatechange",c),a()})}function p(){if(!!n){var b=window.document;if(!b.body){m||(o(p),m=!0);return}try{if(!l){var d=b.createElement("iframe");d.style.display="none",b.body.appendChild(d),d.src=c+"/communication_iframe",l=a.build({window:d.contentWindow,origin:c,scope:"mozid_ni",onReady:function(){l.call({method:"loaded",success:function(){h.ready&&h.ready()},error:function(){}})}}),l.bind("logout",function(a,b){h.logout&&h.logout()}),l.bind("login",function(a,b){h.login&&h.login(b)}),l.bind("match",function(a,b){h.match&&h.match()}),q(i)&&l.notify({method:"loggedInUser",params:i})}}catch(e){l=undefined}}}function q(a){return typeof a!="undefined"}function r(a){try{console.warn(a)}catch(b){}}function s(a,b){if(q(a[b])){r(b+" has been deprecated");return!0}}function t(a,b,c){if(q(a[b])&&q(a[c]))throw new Error("you cannot supply *both* "+b+" and "+c);s(a,b)&&(a[c]=a[b],delete a[b])}function u(a){if(typeof a=="object"){if(a.onlogin&&typeof a.onlogin!="function"||a.onlogout&&typeof a.onlogout!="function"||a.onmatch&&typeof a.onmatch!="function"||a.onready&&typeof a.onready!="function")throw new Error("non-function where function expected in parameters to navigator.id.watch()");if(!a.onlogin)throw new Error("'onlogin' is a required argument to navigator.id.watch()");if(!a.onlogout)throw new Error("'onlogout' is a required argument to navigator.id.watch()");h.login=a.onlogin||null,h.logout=a.onlogout||null,h.match=a.onmatch||null,h.ready=a.onready||null,t(a,"loggedInEmail","loggedInUser"),i=a.loggedInUser,p()}}var v;function w(){var a=v;a==="request"&&(h.ready?a="watch_with_onready":a="watch_without_onready");return a}function x(a){s(a,"requiredEmail"),t(a,"tosURL","termsOfService"),t(a,"privacyURL","privacyPolicy"),a.termsOfService&&!a.privacyPolicy&&r("termsOfService ignored unless privacyPolicy also defined"),a.privacyPolicy&&!a.termsOfService&&r("privacyPolicy ignored unless termsOfService also defined"),a.rp_api=w(),v=null,a.start_time=(new Date).getTime();if(g)try{g.focus()}catch(d){}else{if(!b.isSupported()){var e=b.getNoSupportReason(),i="unsupported_dialog";e==="LOCALSTORAGE_DISABLED"&&(i="cookies_disabled"),g=window.open(c+"/"+i,null,f);return}l&&l.notify({method:"dialog_running"}),g=WinChan.open({url:c+"/sign_in",relay_url:c+"/relay",window_features:f,window_name:"__persona_dialog",params:{method:"get",params:a}},function(b,c){l&&(!b&&c&&c.email&&l.notify({method:"loggedInUser",params:c.email}),l.notify({method:"dialog_complete"})),g=undefined;if(!b&&c&&c.assertion)try{h.login&&h.login(c.assertion)}catch(d){}if(b==="client closed window"||!c)a&&a.oncancel&&a.oncancel(),delete a.oncancel})}}navigator.id={request:function(a){if(this!=navigator.id)throw new Error("all navigator.id calls must be made on the navigator.id object");if(!h.login)throw new Error("navigator.id.watch must be called before navigator.id.request");a=a||{},k(!1),v="request",a.returnTo||(a.returnTo=document.location.pathname);return x(a)},watch:function(a){if(this!=navigator.id)throw new Error("all navigator.id calls must be made on the navigator.id object");k(!1),u(a)},logout:function(a){if(this!=navigator.id)throw new Error("all navigator.id calls must be made on the navigator.id object");p(),l&&l.notify({method:"logout"}),typeof a=="function"&&(r("navigator.id.logout callback argument has been deprecated."),setTimeout(a,0))},get:function(a,b){var c={};b=b||{},c.privacyPolicy=b.privacyPolicy||undefined,c.termsOfService=b.termsOfService||undefined,c.privacyURL=b.privacyURL||undefined,c.tosURL=b.tosURL||undefined,c.siteName=b.siteName||undefined,c.siteLogo=b.siteLogo||undefined,v=v||"get";s(b,"silent")?a&&setTimeout(function(){a(null)},0):(k(!0),u({onlogin:function(b){a&&(a(b),a=null)},onlogout:function(){}}),c.oncancel=function(){a&&(a(null),a=null),h.login=h.logout=h.match=h.ready=null},x(c))},getVerifiedEmail:function(a){r("navigator.id.getVerifiedEmail has been deprecated"),k(!0),v="getVerifiedEmail",navigator.id.get(a)},_shimmed:!0}}})()
 module.exports = navigator.id;
 
-},{}],119:[function(require,module,exports){
+},{}],120:[function(require,module,exports){
 var stream = require('stream')
 var util = require('util')
 var isBuffer = require('isbuffer')
@@ -17747,7 +19466,7 @@ WebsocketStream.prototype.destroy = function() {
   this.ws.close()
 }
 
-},{"isbuffer":120,"stream":7,"util":9}],120:[function(require,module,exports){
+},{"isbuffer":121,"stream":8,"util":10}],121:[function(require,module,exports){
 (function(){var Buffer = require('buffer').Buffer;
 
 module.exports = isBuffer;
@@ -17758,5 +19477,5 @@ function isBuffer (o) {
 }
 
 })()
-},{"buffer":11}]},{},[3])
+},{"buffer":12}]},{},[4])
 ;
