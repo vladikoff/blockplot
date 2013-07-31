@@ -205,7 +205,8 @@ function initGame(user, options) {
     texturePath: textures,
     playerSkin: options.playerSkin || textures + '../player.png',
     chunkSize: gameChunkSize,
-    chunkDistance: 5,
+    chunkDistance: 4,
+    // removeDistance: 10,
     arrayType: Uint8Array,
     worldOrigin: pos,
     materials: options.textures ? materials : colors,
@@ -63353,7 +63354,7 @@ function beginLoadingWorld(user) {
     .on('change', '#file', handleFileSelect)
 
   var container = $('.content')
-  var title = $('.title')
+  var title = $('.world-title')
 
   var hash = window.location.hash
   worldID = hash.substr(1, hash.length - 1)
