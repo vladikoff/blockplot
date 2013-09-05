@@ -7,6 +7,61 @@ var walk = require('voxel-walk')
 var voxelLevel = require('voxel-level')
 var createDebugger = require('voxel-debug')
 var dat = require('dat-gui')
+var bodyPosition;
+
+oculusBridge = new OculusBridge({
+  "debug" : true,
+  "onOrientationUpdate" : bridgeOrientationUpdated,
+  "onConfigUpdate"      : bridgeConfigUpdated,
+  "onConnect"           : bridgeConnected,
+  "onDisconnect"        : bridgeDisconnected
+});
+
+
+function bridgeConnected(){
+  console.log('bridgeConnected');
+}
+
+function bridgeDisconnected(){
+  console.log('bridgeDisconnected');
+}
+
+function bridgeConfigUpdated(config){
+  console.log("Oculus config updated.");
+  //riftCam.setHMD(config);
+}
+
+var headquat;
+
+function bridgeOrientationUpdated(quatValues) {
+
+  // Do first-person style controls (like the Tuscany demo) using the rift and keyboard.
+
+  // TODO: Don't instantiate new objects in here, these should be re-used to avoid garbage collection.
+
+  // make a quaternion for the the body angle rotated about the Y axis.
+  var quat = new THREE.Quaternion();
+  quat.setFromAxisAngle(bodyAxis, bodyAngle);
+
+  // make a quaternion for the current orientation of the Rift
+  var quatCam = new THREE.Quaternion(quatValues.x, quatValues.y, quatValues.z, quatValues.w);
+
+  // multiply the body rotation by the Rift rotation.
+  quat.multiply(quatCam);
+
+
+  // Make a vector pointing along the Z axis and rotate it accoring to the combined look/body angle.
+  var xzVector = new THREE.Vector3(0, 0, 1);
+  xzVector.applyQuaternion(quat);
+
+  // Compute the X/Z angle based on the combined look/body angle.  This will be used for FPS style movement controls
+  // so you can steer with a combination of the keyboard and by moving your head.
+  viewAngle = Math.atan2(xzVector.z, xzVector.x) + Math.PI;
+
+  // Apply the combined look/body angle to the camera.
+  game.view.camera.useQuaternion = true;
+  game.view.camera.quaternion.copy(quat);
+}
 
 var loadDelay = 1000 // milliseconds
 
@@ -64,22 +119,24 @@ function initGame(user, options) {
     playerSkin: options.playerSkin || textures + '../player.png',
     chunkSize: gameChunkSize,
     chunkDistance: 4,
-    // removeDistance: 10,
+    removeDistance: 10,
     arrayType: Uint8Array,
     worldOrigin: pos,
     materials: options.textures ? materials : colors,
     materialFlatColor: options.textures ? false : true,
     controls: { jumpTimer: 3 }
   })
-  
+
   window.game = game // for console debugging
+  window.THREE = game.THREE
+  bodyPosition  = new THREE.Vector3(0, 15, 0);
   var target = game.controls.target()
   
   var debug = createDebugger(game)
   debug.gui.constructor.toggleHide()
   
-  game.view.renderer.setClearColorHex( 0xBFD9EA, 1 )
-  
+  //game.view.renderer.setClearColorHex( 0xBFD9EA, 1 )
+
   var level = voxelLevel(user.db)
 
   var worldWorker = worker(require('./world-worker.js'))
@@ -98,12 +155,20 @@ function initGame(user, options) {
     }, 10 + ~~(Math.random() * loadDelay))
   });
   worldWorker.postMessage({ dbName: 'blocks' })
-  
+
   return game
 }
 
 function startGame(game, user, level, options, worldWorker) {
   options.state = options.state || {}
+  game.once('tick', function() {
+    bodyAngle     = 0;
+    bodyAxis      = new THREE.Vector3(0, 1, 0);
+    oculusBridge.connect();
+    game.camera.position.set(bodyPosition.x, bodyPosition.y, bodyPosition.z);
+
+  });
+
   game.voxels.on('missingChunk', function(p) {
     worldWorker.postMessage({
       worldID: options.id,
