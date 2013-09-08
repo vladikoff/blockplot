@@ -1,7 +1,7 @@
 var createGame = require('voxel-hello-world')
 var fly = require('voxel-fly')
 var worker = require('webworkify')
-
+var gamepad = require('voxel-gamepad')
 var blockInfo = require('minecraft-blockinfo')
 var walk = require('voxel-walk')
 var voxelLevel = require('voxel-level')
@@ -118,7 +118,7 @@ function initGame(user, options) {
     texturePath: textures,
     playerSkin: options.playerSkin || textures + '../player.png',
     chunkSize: gameChunkSize,
-    chunkDistance: 4,
+    chunkDistance: 10,
     removeDistance: 10,
     arrayType: Uint8Array,
     worldOrigin: pos,
@@ -126,6 +126,8 @@ function initGame(user, options) {
     materialFlatColor: options.textures ? false : true,
     controls: { jumpTimer: 3 }
   })
+
+  gamepad(game)
 
   window.game = game // for console debugging
   window.THREE = game.THREE
